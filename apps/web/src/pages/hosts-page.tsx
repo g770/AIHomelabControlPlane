@@ -794,7 +794,7 @@ export function HostsPage() {
             variant={statusFilter === 'online' ? 'secondary' : 'outline'}
             onClick={() => setStatusFilter('online')}
           >
-            /** * Handles online. */ Online ({statusCounts.online})
+            Online ({statusCounts.online})
           </Button>
           <Button
             type="button"
@@ -802,7 +802,7 @@ export function HostsPage() {
             variant={statusFilter === 'offline' ? 'secondary' : 'outline'}
             onClick={() => setStatusFilter('offline')}
           >
-            /** * Handles offline. */ Offline ({statusCounts.offline})
+            Offline ({statusCounts.offline})
           </Button>
 
           <details className="relative">

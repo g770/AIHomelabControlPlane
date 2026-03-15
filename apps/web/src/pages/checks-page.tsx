@@ -673,7 +673,7 @@ export function MonitorsPage() {
               variant={statusFilter === 'all' ? 'secondary' : 'outline'}
               onClick={() => setStatusFilter('all')}
             >
-              /** * Handles all. */ All ({statusCounts.all})
+              All ({statusCounts.all})
             </Button>
             <Button
               type="button"
@@ -681,7 +681,7 @@ export function MonitorsPage() {
               variant={statusFilter === 'failing' ? 'secondary' : 'outline'}
               onClick={() => setStatusFilter('failing')}
             >
-              /** * Handles failing. */ Failing ({statusCounts.failing})
+              Failing ({statusCounts.failing})
             </Button>
           </div>
         </CardHeader>

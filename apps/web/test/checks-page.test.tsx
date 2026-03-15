@@ -76,6 +76,47 @@ afterEach(() => {
 });
 
 describe('MonitorsPage form help text and mutation pending states', () => {
+  it('renders status filter buttons without leaked inline comments', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/checks' && (!init || !init.method)) {
+        return [
+          {
+            id: 'check-1',
+            name: 'Demo HTTP Monitor',
+            type: 'HTTP',
+            target: 'https://example.local/health',
+            expectedStatus: 200,
+            intervalSec: 60,
+            timeoutMs: 2000,
+            keyword: null,
+            enabled: true,
+            hostId: null,
+            serviceId: null,
+            host: null,
+            service: null,
+            results: [{ status: 'UP' }],
+          },
+        ];
+      }
+      if (path === '/api/hosts' && (!init || !init.method)) {
+        return [];
+      }
+      if (path === '/api/services' && (!init || !init.method)) {
+        return [];
+      }
+      if (path === '/api/checks/ai/suggestions' && (!init || !init.method)) {
+        return suggestionsResponse();
+      }
+      throw new Error(`Unexpected apiFetch call: ${path}`);
+    });
+
+    renderMonitorsPage();
+
+    expect(await screen.findByRole('button', { name: 'All (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Failing (0)' })).toBeInTheDocument();
+    expect(screen.queryByText(/Handles all|Handles failing/)).not.toBeInTheDocument();
+  });
+
   it('renders helper text below each monitor form field', async () => {
     vi.mocked(apiFetch).mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/api/checks' && (!init || !init.method)) {

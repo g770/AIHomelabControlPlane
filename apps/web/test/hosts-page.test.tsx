@@ -117,6 +117,16 @@ function mockHostsAndPreferences() {
 }
 
 describe('HostsPage inline metadata editing and table preferences', () => {
+  it('renders status filter buttons without leaked inline comments', async () => {
+    mockHostsAndPreferences();
+    renderHostsPage();
+
+    expect(await screen.findByRole('button', { name: 'All statuses (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Online (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Offline (0)' })).toBeInTheDocument();
+    expect(screen.queryByText(/Handles online|Handles offline/)).not.toBeInTheDocument();
+  });
+
   it('edits tags inline on the host list page', async () => {
     mockHostsAndPreferences();
     renderHostsPage();
