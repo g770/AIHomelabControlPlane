@@ -5,11 +5,19 @@ SPDX-License-Identifier: MIT
 This document introduces the Homelab Dash repository and its core workflows.
 -->
 
-# Homelab Control Plane Monorepo
+# AI Homelab Control Plane
 
 Last verified: 2026-03-14
 
 ## Overview
+This tool allows you to manage the various services in your Homelab. It is designed as a webservice and associated services you can self host. It supports features including:
+
+- Dashboarding functionality that allows you to collect links and live tiles to your homelab services
+- Service discovery automatically finds common homelab services like pihole, proxmox, etc and allows you to monitor them
+- Agents which can be installed on homelab systems to enable more advanced monitoring
+- Monitors and alerting
+- Leverages LLMs for more advanced reasoning and recommends about the state of your homelab
+- Proxmox integration
 
 This repository contains a full homelab control-plane stack:
 
