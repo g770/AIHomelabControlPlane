@@ -20,7 +20,7 @@
     "ping": "^1.0.0"
   },
   "devDependencies": {
-    "@nestjs/platform-fastify": "^11.1.14",
+    "@nestjs/platform-fastify": "^11.1.16",
     "@nestjs/testing": "^11.1.14",
     "@types/node": "^22.13.1",
     "@types/supertest": "^6.0.3",
