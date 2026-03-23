@@ -19,11 +19,11 @@ This is a backlog of product features to be implmemented by an AI agent. Agents 
 - ONLY execute tasks that are in the open backlog items list.
 
 ## Open Backlog Items
-- TASK-003: Implement the plan in the file docs/task-003-neutral-ai-runtime-library-design.md
-- TASK-004: Implement the plan in the file docs/task-004-neutral-ai-runtime-integration-design.md
-- TASK-005: Implement the plan in the docs/openai-usage-spend-settings-design.md
 
 ## Completed Backlog Items
 
+- [x] TASK-003: Implement the plan in the file `docs/task-003-neutral-ai-runtime-library-design.md`. (`6a54762`)
+- [x] TASK-004: Implement the plan in the file `docs/task-004-neutral-ai-runtime-integration-design.md`. (`6a54762`)
+- [x] TASK-005: Implement the plan in the file `docs/openai-usage-spend-settings-design.md`. (`6a54762`)
 - [x] TASK-001: DESIGN TASK. Design support for ollama hosted models. Research how to integrate with ollama and make sure the user can select different AI API providers in the settings interface. Remember there is only one AI api configured at one time. Write a full plan to implement this as a markdown file in the docs folder. (`49ceecc`)
 - [x] TASK-002: DESIGN TASK. Design a feature to show open AI useage and spend. The user should be able to view this in the settings menu. Write a detailed plan on how to implement this as a markdown file in the docs directory. (`65f2237`)
