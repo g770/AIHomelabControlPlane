@@ -7,7 +7,7 @@ This document introduces the Homelab Dash repository and its core workflows.
 
 # AI Homelab Control Plane
 
-Last verified: 2026-03-14
+Last verified: 2026-03-23
 
 ## Overview
 This tool allows you to manage the various services in your Homelab. It is designed as a webservice and associated services you can self host. It supports features including:
@@ -68,7 +68,10 @@ Ubuntu and Debian contributor bootstrap: `./bootstrap-dev-env.sh`
 
 5. Open the UI at `http://localhost:5173`.
 6. On first load, set the password for the built-in local admin account.
-7. If you want model-backed AI features, configure the OpenAI API key from Settings after signing in.
+7. If you want model-backed AI features, configure one AI provider from Settings after signing in.
+   OpenAI uses the runtime API key plus the env-driven `OPENAI_MODEL`.
+   Ollama uses the base URL, optional token, and selected model saved in Settings.
+   The `OpenAI Usage & Spend` card optionally accepts a separate Admin API key for cached usage telemetry.
 8. Enroll or install real agents from the dashboard when you are ready to connect hosts.
 
 ## Contributor Workflow
@@ -108,6 +111,7 @@ Convenience targets:
 - Write actions require explicit approval and audit events.
 - Diagnostics stay allowlisted; no arbitrary shell execution is permitted.
 - Runtime secrets must come from env files or deployment configuration, not executable fallbacks.
-- The OpenAI API key is configured later from Settings and is not generated into local env files.
+- AI provider secrets are configured later from Settings and are not generated into local env files.
+- The OpenAI usage/spend Admin API key is separate from the runtime inference key.
 
 Top-level vulnerability reporting guidance lives in `SECURITY.md`.

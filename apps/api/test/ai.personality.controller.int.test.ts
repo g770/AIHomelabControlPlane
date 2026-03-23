@@ -11,6 +11,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AiController } from '../src/modules/ai/ai.controller';
 import { AiProviderService } from '../src/modules/ai/ai-provider.service';
+import { AiUsageService } from '../src/modules/ai/ai-usage.service';
 import { AiService } from '../src/modules/ai/ai.service';
 
 describe('AiController personality endpoints (integration)', () => {
@@ -25,6 +26,13 @@ describe('AiController personality endpoints (integration)', () => {
   const aiProviderServiceMock = {
     getProviderConfig: vi.fn(),
     setProviderConfig: vi.fn(),
+    listAvailableModels: vi.fn(),
+  };
+  const aiUsageServiceMock = {
+    getUsageConfig: vi.fn(),
+    setUsageConfig: vi.fn(),
+    getUsageSummary: vi.fn(),
+    refreshUsage: vi.fn(),
   };
 
   @Module({
@@ -37,6 +45,10 @@ describe('AiController personality endpoints (integration)', () => {
       {
         provide: AiProviderService,
         useValue: aiProviderServiceMock,
+      },
+      {
+        provide: AiUsageService,
+        useValue: aiUsageServiceMock,
       },
     ],
   })
@@ -97,8 +109,13 @@ describe('AiController personality endpoints (integration)', () => {
   it('GET /api/ai/provider returns safe provider metadata', async () => {
     aiProviderServiceMock.getProviderConfig.mockResolvedValueOnce({
       configured: true,
+      provider: 'openai',
       model: 'gpt-5-mini',
       updatedAt: '2026-03-14T02:30:00.000Z',
+      openai: {
+        apiKeyConfigured: true,
+      },
+      ollama: null,
     });
 
     const response = await app.inject({
@@ -119,8 +136,13 @@ describe('AiController personality endpoints (integration)', () => {
   it('PUT /api/ai/provider validates confirmation and forwards the requested key update', async () => {
     aiProviderServiceMock.setProviderConfig.mockResolvedValueOnce({
       configured: true,
+      provider: 'openai',
       model: 'gpt-5-mini',
       updatedAt: '2026-03-14T02:40:00.000Z',
+      openai: {
+        apiKeyConfigured: true,
+      },
+      ollama: null,
     });
 
     const response = await app.inject({
@@ -128,12 +150,142 @@ describe('AiController personality endpoints (integration)', () => {
       url: '/api/ai/provider',
       payload: {
         confirm: true,
+        provider: 'openai',
         apiKey: 'sk-live-123',
       },
     });
 
     expect(response.statusCode, response.body).toBe(200);
-    expect(aiProviderServiceMock.setProviderConfig).toHaveBeenCalledWith('user-456', 'sk-live-123');
+    expect(aiProviderServiceMock.setProviderConfig).toHaveBeenCalledWith('user-456', {
+      confirm: true,
+      provider: 'openai',
+      apiKey: 'sk-live-123',
+    });
+  });
+
+  it('GET /api/ai/provider/models returns provider discovery metadata', async () => {
+    aiProviderServiceMock.listAvailableModels.mockResolvedValueOnce({
+      provider: 'ollama',
+      supported: true,
+      fetchedAt: '2026-03-23T12:00:00.000Z',
+      models: [
+        {
+          id: 'qwen3:8b',
+          modifiedAt: '2026-03-23T11:55:00.000Z',
+          sizeBytes: 5234567890,
+          family: 'qwen3',
+          parameterSize: '8B',
+          quantizationLevel: 'Q4_K_M',
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/ai/provider/models',
+    });
+    const body = response.json() as Record<string, unknown>;
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(aiProviderServiceMock.listAvailableModels).toHaveBeenCalledOnce();
+    expect(body).toMatchObject({
+      provider: 'ollama',
+      supported: true,
+    });
+  });
+
+  it('GET /api/ai/usage-config returns safe telemetry metadata', async () => {
+    aiUsageServiceMock.getUsageConfig.mockResolvedValueOnce({
+      configured: true,
+      projectIds: ['proj_123'],
+      updatedAt: '2026-03-23T12:00:00.000Z',
+      lastRefreshAttemptAt: '2026-03-23T12:10:00.000Z',
+      lastRefreshSucceededAt: '2026-03-23T12:09:00.000Z',
+      lastRefreshError: null,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/ai/usage-config',
+    });
+    const body = response.json() as Record<string, unknown>;
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(aiUsageServiceMock.getUsageConfig).toHaveBeenCalledOnce();
+    expect(body).toMatchObject({
+      configured: true,
+      projectIds: ['proj_123'],
+    });
+    expect(body).not.toHaveProperty('adminApiKey');
+  });
+
+  it('PUT /api/ai/usage-config validates confirmation and forwards payload', async () => {
+    aiUsageServiceMock.setUsageConfig.mockResolvedValueOnce({
+      configured: true,
+      projectIds: ['proj_123'],
+      updatedAt: '2026-03-23T12:00:00.000Z',
+      lastRefreshAttemptAt: null,
+      lastRefreshSucceededAt: null,
+      lastRefreshError: null,
+    });
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/ai/usage-config',
+      payload: {
+        confirm: true,
+        adminApiKey: 'sk-admin-123',
+        projectIds: ['proj_123'],
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(aiUsageServiceMock.setUsageConfig).toHaveBeenCalledWith('user-456', {
+      confirm: true,
+      adminApiKey: 'sk-admin-123',
+      projectIds: ['proj_123'],
+    });
+  });
+
+  it('GET /api/ai/usage-summary validates the window and forwards it as a number', async () => {
+    aiUsageServiceMock.getUsageSummary.mockResolvedValueOnce({
+      configured: true,
+      projectIds: [],
+      windowDays: 7,
+      lastRefreshAttemptAt: '2026-03-23T12:10:00.000Z',
+      lastRefreshSucceededAt: '2026-03-23T12:09:00.000Z',
+      lastRefreshError: null,
+      snapshot: null,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/ai/usage-summary?windowDays=7',
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(aiUsageServiceMock.getUsageSummary).toHaveBeenCalledWith(7);
+  });
+
+  it('POST /api/ai/usage-refresh validates confirmation and forwards the refresh request', async () => {
+    aiUsageServiceMock.refreshUsage.mockResolvedValueOnce({
+      ok: true,
+      syncedAt: '2026-03-23T12:11:00.000Z',
+      lastRefreshAttemptAt: '2026-03-23T12:10:00.000Z',
+      lastRefreshSucceededAt: '2026-03-23T12:11:00.000Z',
+      lastRefreshError: null,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/usage-refresh',
+      payload: {
+        confirm: true,
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(201);
+    expect(aiUsageServiceMock.refreshUsage).toHaveBeenCalledWith('user-456');
   });
 
   it('PUT /api/ai/personality validates confirmation and forwards payload', async () => {
@@ -185,5 +337,39 @@ describe('AiController personality endpoints (integration)', () => {
 
     expect(response.statusCode).toBe(400);
     expect(aiProviderServiceMock.setProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/ai/usage-summary rejects unsupported windows', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/ai/usage-summary?windowDays=14',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(aiUsageServiceMock.getUsageSummary).not.toHaveBeenCalled();
+  });
+
+  it('PUT /api/ai/usage-config rejects invalid payloads', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/ai/usage-config',
+      payload: {
+        projectIds: ['proj_123'],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(aiUsageServiceMock.setUsageConfig).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/ai/usage-refresh rejects invalid payloads', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/usage-refresh',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(aiUsageServiceMock.refreshUsage).not.toHaveBeenCalled();
   });
 });

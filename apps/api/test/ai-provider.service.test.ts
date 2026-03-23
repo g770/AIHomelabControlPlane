@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Homelab Control Plane contributors
  * SPDX-License-Identifier: MIT
  *
- * This test file verifies the ai provider service test behavior.
+ * This test file verifies the ai provider service behavior.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiProviderService } from '../src/modules/ai/ai-provider.service';
@@ -15,6 +15,7 @@ describe('AiProviderService', () => {
     opsMemory: {
       findUnique: vi.fn(),
       upsert: vi.fn(),
+      deleteMany: vi.fn(),
     },
   };
   const configService = {
@@ -40,6 +41,7 @@ describe('AiProviderService', () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'local-admin-id',
     });
+    prisma.opsMemory.deleteMany.mockResolvedValue({ count: 0 });
     service = new AiProviderService(
       prisma as never,
       configService as never,
@@ -48,75 +50,121 @@ describe('AiProviderService', () => {
     );
   });
 
-  it('returns safe provider metadata without exposing the stored key', async () => {
-    prisma.opsMemory.findUnique.mockResolvedValueOnce({
-      id: 'memory-1',
-      value: {
-        apiKeyEncrypted: 'encrypted-key',
-      },
-      updatedAt: new Date('2026-03-14T03:00:00.000Z'),
-    });
+  it('falls back to legacy ai_provider_v1 metadata without exposing the key', async () => {
+    prisma.opsMemory.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'memory-1',
+        value: {
+          apiKeyEncrypted: 'encrypted-key',
+        },
+        updatedAt: new Date('2026-03-14T03:00:00.000Z'),
+      });
 
     await expect(service.getProviderConfig()).resolves.toEqual({
       configured: true,
+      provider: 'openai',
       model: 'gpt-5-mini',
       updatedAt: '2026-03-14T03:00:00.000Z',
-    });
-    expect(prisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: 'admin@local' },
-      select: { id: true },
+      openai: {
+        apiKeyConfigured: true,
+      },
+      ollama: null,
     });
   });
 
-  it('builds an OpenAI client from the encrypted key without exposing it', async () => {
-    prisma.opsMemory.findUnique.mockResolvedValueOnce({
-      id: 'memory-1',
-      value: {
-        apiKeyEncrypted: 'encrypted-key',
-      },
-      updatedAt: new Date('2026-03-14T03:00:00.000Z'),
-    });
+  it('builds a neutral runtime handle from legacy OpenAI credentials', async () => {
+    prisma.opsMemory.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'memory-1',
+        value: {
+          apiKeyEncrypted: 'encrypted-key',
+        },
+        updatedAt: new Date('2026-03-14T03:00:00.000Z'),
+      });
     securityService.decryptJson.mockReturnValueOnce({
       apiKey: 'sk-live-123',
     });
 
-    const client = await service.getClient();
+    const runtime = await service.getRuntime();
 
-    expect(client).toBeTruthy();
+    expect(runtime?.provider).toBe('openai');
+    expect(runtime?.model).toBe('gpt-5-mini');
+    expect(typeof runtime?.client.generate).toBe('function');
     expect(securityService.decryptJson).toHaveBeenCalledWith('encrypted-key');
   });
 
-  it('stores an encrypted key under the installation admin and writes a safe audit event', async () => {
+  it('stores ai_provider_v2 OpenAI config and writes a secret-safe audit event', async () => {
     securityService.encryptJson.mockReturnValueOnce('encrypted-key');
+    prisma.opsMemory.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'memory-1',
+        value: {
+          schemaVersion: 2,
+          provider: 'openai',
+          config: {
+            apiKeyEncrypted: 'encrypted-key',
+          },
+        },
+        updatedAt: new Date('2026-03-14T03:05:00.000Z'),
+      });
     prisma.opsMemory.upsert.mockResolvedValueOnce({
       id: 'memory-1',
       updatedAt: new Date('2026-03-14T03:05:00.000Z'),
     });
 
-    await expect(service.setProviderConfig('user-1', 'sk-live-123')).resolves.toEqual({
+    await expect(
+      service.setProviderConfig('user-1', {
+        confirm: true,
+        provider: 'openai',
+        apiKey: 'sk-live-123',
+      }),
+    ).resolves.toEqual({
       configured: true,
+      provider: 'openai',
       model: 'gpt-5-mini',
       updatedAt: '2026-03-14T03:05:00.000Z',
+      openai: {
+        apiKeyConfigured: true,
+      },
+      ollama: null,
     });
     expect(securityService.encryptJson).toHaveBeenCalledWith({ apiKey: 'sk-live-123' });
     expect(prisma.opsMemory.upsert).toHaveBeenCalledWith({
       where: {
         userId_key: {
           userId: 'local-admin-id',
-          key: 'ai_provider_v1',
+          key: 'ai_provider_v2',
         },
       },
       update: {
         value: {
-          apiKeyEncrypted: 'encrypted-key',
+          schemaVersion: 2,
+          provider: 'openai',
+          config: {
+            apiKeyEncrypted: 'encrypted-key',
+          },
         },
       },
       create: {
         userId: 'local-admin-id',
-        key: 'ai_provider_v1',
+        key: 'ai_provider_v2',
         value: {
-          apiKeyEncrypted: 'encrypted-key',
+          schemaVersion: 2,
+          provider: 'openai',
+          config: {
+            apiKeyEncrypted: 'encrypted-key',
+          },
         },
+      },
+    });
+    expect(prisma.opsMemory.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'local-admin-id',
+        key: 'ai_provider_v1',
       },
     });
     expect(auditService.write).toHaveBeenCalledWith({
@@ -126,24 +174,47 @@ describe('AiProviderService', () => {
       targetId: 'memory-1',
       paramsJson: {
         configured: true,
+        provider: 'openai',
+        model: 'gpt-5-mini',
+        replacedPreviousProvider: true,
+        ollamaBaseUrl: undefined,
       },
       success: true,
     });
     expect(JSON.stringify(auditService.write.mock.calls[0]?.[0])).not.toContain('sk-live-123');
   });
 
-  it('clears the configured key without writing secret material', async () => {
+  it('writes the cleared sentinel when the provider is removed', async () => {
+    prisma.opsMemory.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'memory-1',
+        value: {
+          schemaVersion: 2,
+          provider: null,
+          config: null,
+        },
+        updatedAt: new Date('2026-03-14T03:10:00.000Z'),
+      });
     prisma.opsMemory.upsert.mockResolvedValueOnce({
       id: 'memory-1',
       updatedAt: new Date('2026-03-14T03:10:00.000Z'),
     });
 
-    await expect(service.setProviderConfig('user-1', null)).resolves.toEqual({
+    await expect(
+      service.setProviderConfig('user-1', {
+        confirm: true,
+        provider: 'none',
+      }),
+    ).resolves.toEqual({
       configured: false,
-      model: 'gpt-5-mini',
+      provider: null,
+      model: null,
       updatedAt: '2026-03-14T03:10:00.000Z',
+      openai: null,
+      ollama: null,
     });
-    expect(securityService.encryptJson).not.toHaveBeenCalled();
     expect(auditService.write).toHaveBeenCalledWith({
       actorUserId: 'user-1',
       action: 'ai.provider.update',
@@ -151,6 +222,10 @@ describe('AiProviderService', () => {
       targetId: 'memory-1',
       paramsJson: {
         configured: false,
+        provider: null,
+        model: null,
+        replacedPreviousProvider: false,
+        ollamaBaseUrl: undefined,
       },
       success: true,
     });
@@ -161,8 +236,11 @@ describe('AiProviderService', () => {
 
     await expect(service.getProviderConfig()).resolves.toEqual({
       configured: false,
-      model: 'gpt-5-mini',
+      provider: null,
+      model: null,
       updatedAt: null,
+      openai: null,
+      ollama: null,
     });
     await expect(service.isConfigured()).resolves.toBe(false);
   });

@@ -5,7 +5,7 @@
  * This module implements checks service business logic for the service layer.
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Check, Prisma } from '@prisma/client';
+import type { AlertEventStatus, Check, Prisma } from '@prisma/client';
 import { createCheckSchema } from '@homelab/shared';
 import * as net from 'net';
 import ping from 'ping';
@@ -102,7 +102,7 @@ const aiMonitorSuggestionsSchema = z
   .strict();
 
 const placeholderKeywordTokens = new Set(['optional', 'none', 'n/a', 'na', 'null']);
-const alertEventStatusesOpen = ['PENDING', 'FIRING'];
+const alertEventStatusesOpen: AlertEventStatus[] = ['PENDING', 'FIRING'];
 const eventSeverityError = 'ERROR';
 
 type CheckResultStatus = 'UP' | 'DOWN' | 'UNKNOWN';
@@ -224,8 +224,8 @@ export class ChecksService {
       references.validServiceIds,
     );
 
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       return {
         aiEnabled: false,
         generatedByAi: false,
@@ -239,60 +239,49 @@ export class ChecksService {
     const personality = await this.resolveUserPersonality(userId);
 
     try {
-      const response = await openai.responses.create({
-        model: this.aiProviderService.getModel(),
-        input: [
+      const response = await runtime.client.generate({
+        messages: [
           {
             role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text: buildPersonalitySystemPrompt(
-                  [
-                    'You translate plain-English monitor requests into strict check configuration JSON.',
-                    'Return JSON only and no markdown.',
-                    'Use exactly one monitor object matching this shape:',
-                    JSON.stringify({
-                      name: 'string',
-                      type: 'HTTP | TCP | ICMP',
-                      target: 'string',
-                      intervalSec: 60,
-                      timeoutMs: 2000,
-                      enabled: true,
-                      expectedStatus: 200,
-                    }),
-                    'For HTTP, include expectedStatus and include keyword only when a specific body string must be matched.',
-                    'Omit optional fields when unknown: keyword, hostId, serviceId, rationale, confidence.',
-                    'For TCP, target must be host:port.',
-                    'For ICMP, target must be hostname or IP.',
-                    'Respect bounds: intervalSec 10..3600, timeoutMs 100..30000.',
-                    'Use only hostId/serviceId values provided in the context when applicable.',
-                  ].join(' '),
-                  personality,
-                ),
-              },
-            ],
+            content: buildPersonalitySystemPrompt(
+              [
+                'You translate plain-English monitor requests into strict check configuration JSON.',
+                'Return JSON only and no markdown.',
+                'Use exactly one monitor object matching this shape:',
+                JSON.stringify({
+                  name: 'string',
+                  type: 'HTTP | TCP | ICMP',
+                  target: 'string',
+                  intervalSec: 60,
+                  timeoutMs: 2000,
+                  enabled: true,
+                  expectedStatus: 200,
+                }),
+                'For HTTP, include expectedStatus and include keyword only when a specific body string must be matched.',
+                'Omit optional fields when unknown: keyword, hostId, serviceId, rationale, confidence.',
+                'For TCP, target must be host:port.',
+                'For ICMP, target must be hostname or IP.',
+                'Respect bounds: intervalSec 10..3600, timeoutMs 100..30000.',
+                'Use only hostId/serviceId values provided in the context when applicable.',
+              ].join(' '),
+              personality,
+            ),
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: JSON.stringify({
-                  description,
-                  selectedHostId: input.hostId ?? null,
-                  selectedServiceId: input.serviceId ?? null,
-                  knownHosts: references.hosts.slice(0, 80),
-                  knownServices: references.services.slice(0, 80),
-                  fallbackSuggestion: fallbackSanitized,
-                }),
-              },
-            ],
+            content: JSON.stringify({
+              description,
+              selectedHostId: input.hostId ?? null,
+              selectedServiceId: input.serviceId ?? null,
+              knownHosts: references.hosts.slice(0, 80),
+              knownServices: references.services.slice(0, 80),
+              fallbackSuggestion: fallbackSanitized,
+            }),
           },
         ],
       });
 
-      const parsed = parseAiMonitorDraft(response.output_text ?? '');
+      const parsed = parseAiMonitorDraft(response.outputText);
       if (!parsed) {
         return {
           aiEnabled: true,
@@ -427,70 +416,59 @@ export class ChecksService {
     let generatedByAi = false;
     const warnings: string[] = [];
 
-    const openai = await this.aiProviderService.getClient();
-    const aiEnabled = Boolean(openai);
+    const runtime = await this.aiProviderService.getRuntime();
+    const aiEnabled = Boolean(runtime);
 
-    if (!openai) {
+    if (!runtime) {
       warnings.push('AI is disabled. Generated heuristic suggestions only.');
     } else {
       const personality = await this.resolveUserPersonality(userId);
       try {
-        const response = await openai.responses.create({
-          model: this.aiProviderService.getModel(),
-          input: [
+        const response = await runtime.client.generate({
+          messages: [
             {
               role: 'system',
-              content: [
-                {
-                  type: 'input_text',
-                  text: buildPersonalitySystemPrompt(
-                    [
-                      'You recommend monitor checks for a homelab.',
-                      'Return JSON only using this exact shape:',
-                      JSON.stringify({
-                        suggestions: [
-                          {
-                            name: 'string',
-                            type: 'HTTP | TCP | ICMP',
-                            target: 'string',
-                            intervalSec: 60,
-                            timeoutMs: 2000,
-                            enabled: true,
-                            expectedStatus: 200,
-                          },
-                        ],
-                      }),
-                      'Omit optional fields when unknown: keyword, hostId, serviceId, rationale, confidence.',
-                      'Avoid duplicates of existing checks.',
-                      'Use hostId/serviceId only when those IDs are present in input context.',
-                      'Prioritize high-value checks with broad coverage and clear operational signal.',
-                      'Keep to at most 25 suggestions.',
-                    ].join(' '),
-                    personality,
-                  ),
-                },
-              ],
+              content: buildPersonalitySystemPrompt(
+                [
+                  'You recommend monitor checks for a homelab.',
+                  'Return JSON only using this exact shape:',
+                  JSON.stringify({
+                    suggestions: [
+                      {
+                        name: 'string',
+                        type: 'HTTP | TCP | ICMP',
+                        target: 'string',
+                        intervalSec: 60,
+                        timeoutMs: 2000,
+                        enabled: true,
+                        expectedStatus: 200,
+                      },
+                    ],
+                  }),
+                  'Omit optional fields when unknown: keyword, hostId, serviceId, rationale, confidence.',
+                  'Avoid duplicates of existing checks.',
+                  'Use hostId/serviceId only when those IDs are present in input context.',
+                  'Prioritize high-value checks with broad coverage and clear operational signal.',
+                  'Keep to at most 25 suggestions.',
+                ].join(' '),
+                personality,
+              ),
             },
             {
               role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: JSON.stringify({
-                    hosts,
-                    services,
-                    existingChecks,
-                    activeAlerts,
-                    recentEvents,
-                    baselineSuggestions: heuristic.slice(0, 20),
-                  }),
-                },
-              ],
+              content: JSON.stringify({
+                hosts,
+                services,
+                existingChecks,
+                activeAlerts,
+                recentEvents,
+                baselineSuggestions: heuristic.slice(0, 20),
+              }),
             },
           ],
         });
 
-        const parsed = parseAiMonitorSuggestions(response.output_text ?? '');
+        const parsed = parseAiMonitorSuggestions(response.outputText);
         if (parsed.length === 0) {
           warnings.push('AI suggestions could not be parsed. Showing heuristic suggestions.');
         } else {

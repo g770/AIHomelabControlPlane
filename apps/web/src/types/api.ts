@@ -401,12 +401,158 @@ export type NotificationRouteSummary = {
 };
 
 /**
+ * Describes the ai provider id shape.
+ */
+export type AiProviderId = 'openai' | 'ollama';
+
+/**
  * Describes the ai provider config response shape.
  */
 export type AiProviderConfigResponse = {
   configured: boolean;
-  model: string;
+  provider: AiProviderId | null;
+  model: string | null;
   updatedAt: string | null;
+  openai: {
+    apiKeyConfigured: boolean;
+  } | null;
+  ollama: {
+    baseUrl: string;
+    apiKeyConfigured: boolean;
+  } | null;
+};
+
+/**
+ * Describes the ai provider model info shape.
+ */
+export type AiProviderModelInfo = {
+  id: string;
+  modifiedAt: string | null;
+  sizeBytes: number | null;
+  family: string | null;
+  parameterSize: string | null;
+  quantizationLevel: string | null;
+};
+
+/**
+ * Describes the ai provider models response shape.
+ */
+export type AiProviderModelsResponse = {
+  provider: AiProviderId;
+  supported: boolean;
+  fetchedAt: string;
+  models: AiProviderModelInfo[];
+};
+
+/**
+ * Describes the ai usage telemetry config response shape.
+ */
+export type AiUsageTelemetryConfigResponse = {
+  configured: boolean;
+  projectIds: string[];
+  updatedAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  lastRefreshSucceededAt: string | null;
+  lastRefreshError: {
+    message: string;
+    occurredAt: string;
+  } | null;
+};
+
+/**
+ * Describes the ai usage window days shape.
+ */
+export type AiUsageWindowDays = 7 | 30 | 90;
+
+/**
+ * Describes the ai usage summary snapshot shape.
+ */
+export type AiUsageSummarySnapshot = {
+  source: 'openai_admin_api';
+  coverage: {
+    spendSource: 'organization.costs';
+    usageSources: Array<'organization.usage.completions'>;
+    usageScope: 'text_generation';
+  };
+  windowDays: AiUsageWindowDays;
+  scope: {
+    projectIds: string[];
+  };
+  syncedAt: string;
+  currency: string;
+  totals: {
+    spendTotal: number;
+    spendToday: number;
+    spendMonthToDate: number;
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+  };
+  series: {
+    dailySpend: Array<{
+      date: string;
+      amount: number;
+    }>;
+    dailyUsage: Array<{
+      date: string;
+      requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens: number;
+    }>;
+  };
+  breakdowns: {
+    byModel: Array<{
+      label: string | null;
+      requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens: number;
+    }>;
+    byProject: Array<{
+      label: string | null;
+      spend: number;
+      requests: number;
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens: number;
+    }>;
+    byLineItem: Array<{
+      label: string | null;
+      amount: number;
+    }>;
+  };
+};
+
+/**
+ * Describes the ai usage summary response shape.
+ */
+export type AiUsageSummaryResponse = {
+  configured: boolean;
+  projectIds: string[];
+  windowDays: AiUsageWindowDays;
+  lastRefreshAttemptAt: string | null;
+  lastRefreshSucceededAt: string | null;
+  lastRefreshError: {
+    message: string;
+    occurredAt: string;
+  } | null;
+  snapshot: AiUsageSummarySnapshot | null;
+};
+
+/**
+ * Describes the ai usage refresh response shape.
+ */
+export type AiUsageRefreshResponse = {
+  ok: true;
+  syncedAt: string | null;
+  lastRefreshAttemptAt: string;
+  lastRefreshSucceededAt: string | null;
+  lastRefreshError: {
+    message: string;
+    occurredAt: string;
+  } | null;
 };
 
 /**
@@ -1327,6 +1473,7 @@ export type DashboardAgentOpenAiUsage = {
 export type DashboardAgentOpenAiCall = {
   id: string;
   step: string;
+  provider: AiProviderId;
   model: string;
   status: DashboardAgentOpenAiCallStatus;
   startedAt: string;

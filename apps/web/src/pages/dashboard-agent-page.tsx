@@ -376,7 +376,7 @@ export function DashboardAgentPage() {
               <div className="min-w-0 space-y-3 rounded-md border border-border/60 bg-background/40 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">OpenAI Debug Console</div>
+                    <div className="text-sm font-medium">AI Debug Console</div>
                     <div className="text-xs text-muted-foreground">
                       {openAiCalls.length} captured call{openAiCalls.length === 1 ? '' : 's'}.
                     </div>
@@ -400,7 +400,7 @@ export function DashboardAgentPage() {
                   <div className="min-w-0 space-y-2">
                     {openAiCalls.length === 0 && (
                       <div className="text-xs text-muted-foreground">
-                        No OpenAI calls were captured for this run.
+                        No AI calls were captured for this run.
                       </div>
                     )}
                     {openAiCalls.map((call) => (
@@ -635,6 +635,7 @@ function normalizeOpenAiCall(entry: unknown, index: number): DashboardAgentOpenA
       typeof record.step === 'string' && record.step.trim().length > 0
         ? record.step
         : 'unknown_step',
+    provider: record.provider === 'ollama' ? 'ollama' : 'openai',
     model:
       typeof record.model === 'string' && record.model.trim().length > 0 ? record.model : 'unknown',
     status,

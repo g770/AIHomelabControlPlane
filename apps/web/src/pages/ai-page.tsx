@@ -57,8 +57,8 @@ export function AiPage() {
       <CardContent className="space-y-3">
         {aiStatusQuery.data && !aiStatusQuery.data.enabled && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-            AI disabled: configure the OpenAI API key in <code>Settings</code> to enable
-            model-backed responses.
+            AI disabled: configure an AI provider in <code>Settings</code> to enable model-backed
+            responses.
           </div>
         )}
         <div className="grid gap-3">

@@ -38,8 +38,7 @@ describe('ChecksService AI monitor draft sanitization', () => {
   };
 
   const aiProviderService = {
-    getClient: vi.fn(),
-    getModel: vi.fn(() => 'gpt-5-mini'),
+    getRuntime: vi.fn(),
   };
 
   let service: ChecksService;
@@ -53,6 +52,7 @@ describe('ChecksService AI monitor draft sanitization', () => {
     prisma.alertEvent.findMany.mockResolvedValue([]);
     prisma.event.findMany.mockResolvedValue([]);
     prisma.opsMemory.findUnique.mockResolvedValue(null);
+    aiProviderService.getRuntime.mockResolvedValue(null);
 
     service = new ChecksService(
       prisma as never,
@@ -63,10 +63,12 @@ describe('ChecksService AI monitor draft sanitization', () => {
   });
 
   it('drops placeholder keyword from AI parse monitor responses', async () => {
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        generate: vi.fn().mockResolvedValue({
+          outputText: JSON.stringify({
             name: 'Pi-hole 192.168.3.15 admin',
             type: 'HTTP',
             target: 'http://192.168.3.15/admin',
@@ -89,10 +91,12 @@ describe('ChecksService AI monitor draft sanitization', () => {
   });
 
   it('drops placeholder keyword from AI monitor suggestions', async () => {
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        generate: vi.fn().mockResolvedValue({
+          outputText: JSON.stringify({
             suggestions: [
               {
                 name: 'Pi-hole admin',
@@ -118,10 +122,12 @@ describe('ChecksService AI monitor draft sanitization', () => {
   });
 
   it('keeps meaningful keyword from AI parse monitor responses', async () => {
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          output_text: JSON.stringify({
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        generate: vi.fn().mockResolvedValue({
+          outputText: JSON.stringify({
             name: 'Pi-hole login page',
             type: 'HTTP',
             target: 'http://192.168.3.15/admin/',

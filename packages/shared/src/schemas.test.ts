@@ -16,6 +16,8 @@ import {
   aiProviderConfigResponseSchema,
   aiProviderConfigUpdateSchema,
   aiPersonalityUpdateSchema,
+  aiUsageSummaryResponseSchema,
+  aiUsageTelemetryConfigUpdateSchema,
   alertCatalogResponseSchema,
   alertParseRequestSchema,
   alertPreviewRequestSchema,
@@ -731,23 +733,38 @@ describe('aiPersonalityUpdateSchema', () => {
 });
 
 describe('aiProviderConfigUpdateSchema', () => {
-  it('accepts a confirmed key update', () => {
+  it('accepts a confirmed OpenAI update', () => {
     const parsed = aiProviderConfigUpdateSchema.parse({
       confirm: true,
+      provider: 'openai',
       apiKey: 'sk-live-123',
     });
 
     expect(parsed.confirm).toBe(true);
-    expect(parsed.apiKey).toBe('sk-live-123');
+    expect(parsed.provider).toBe('openai');
+    expect(parsed.provider === 'openai' ? parsed.apiKey : null).toBe('sk-live-123');
   });
 
-  it('accepts explicit key clearing', () => {
+  it('accepts an Ollama update', () => {
     const parsed = aiProviderConfigUpdateSchema.parse({
       confirm: true,
+      provider: 'ollama',
+      baseUrl: 'http://ollama:11434',
+      model: 'qwen3:8b',
       apiKey: null,
     });
 
-    expect(parsed.apiKey).toBeNull();
+    expect(parsed.provider).toBe('ollama');
+    expect(parsed.provider === 'ollama' ? parsed.apiKey : undefined).toBeNull();
+  });
+
+  it('accepts explicit provider clearing', () => {
+    const parsed = aiProviderConfigUpdateSchema.parse({
+      confirm: true,
+      provider: 'none',
+    });
+
+    expect(parsed.provider).toBe('none');
   });
 });
 
@@ -755,12 +772,103 @@ describe('aiProviderConfigResponseSchema', () => {
   it('accepts safe provider metadata', () => {
     const parsed = aiProviderConfigResponseSchema.parse({
       configured: true,
+      provider: 'openai',
       model: 'gpt-5-mini',
       updatedAt: '2026-03-14T02:00:00.000Z',
+      openai: {
+        apiKeyConfigured: true,
+      },
+      ollama: null,
     });
 
     expect(parsed.configured).toBe(true);
+    expect(parsed.provider).toBe('openai');
     expect(parsed.model).toBe('gpt-5-mini');
+  });
+});
+
+describe('aiUsageTelemetryConfigUpdateSchema', () => {
+  it('accepts telemetry config writes with explicit confirmation', () => {
+    const parsed = aiUsageTelemetryConfigUpdateSchema.parse({
+      confirm: true,
+      adminApiKey: 'sk-admin-123',
+      projectIds: ['proj_123'],
+    });
+
+    expect(parsed.confirm).toBe(true);
+    expect(parsed.projectIds).toEqual(['proj_123']);
+  });
+});
+
+describe('aiUsageSummaryResponseSchema', () => {
+  it('accepts cached usage summary payloads', () => {
+    const parsed = aiUsageSummaryResponseSchema.parse({
+      configured: true,
+      projectIds: ['proj_123'],
+      windowDays: 30,
+      lastRefreshAttemptAt: '2026-03-23T10:00:00.000Z',
+      lastRefreshSucceededAt: '2026-03-23T09:15:00.000Z',
+      lastRefreshError: null,
+      snapshot: {
+        source: 'openai_admin_api',
+        coverage: {
+          spendSource: 'organization.costs',
+          usageSources: ['organization.usage.completions'],
+          usageScope: 'text_generation',
+        },
+        windowDays: 30,
+        scope: {
+          projectIds: ['proj_123'],
+        },
+        syncedAt: '2026-03-23T09:15:00.000Z',
+        currency: 'usd',
+        totals: {
+          spendTotal: 12.34,
+          spendToday: 0.42,
+          spendMonthToDate: 8.91,
+          requests: 123,
+          inputTokens: 456,
+          outputTokens: 78,
+          cachedInputTokens: 9,
+        },
+        series: {
+          dailySpend: [{ date: '2026-03-22', amount: 1.23 }],
+          dailyUsage: [
+            {
+              date: '2026-03-22',
+              requests: 12,
+              inputTokens: 34,
+              outputTokens: 56,
+              cachedInputTokens: 7,
+            },
+          ],
+        },
+        breakdowns: {
+          byModel: [
+            {
+              label: 'gpt-5-mini',
+              requests: 12,
+              inputTokens: 34,
+              outputTokens: 56,
+              cachedInputTokens: 7,
+            },
+          ],
+          byProject: [
+            {
+              label: 'proj_123',
+              spend: 1.23,
+              requests: 12,
+              inputTokens: 34,
+              outputTokens: 56,
+              cachedInputTokens: 7,
+            },
+          ],
+          byLineItem: [{ label: 'input', amount: 1.23 }],
+        },
+      },
+    });
+
+    expect(parsed.snapshot?.totals.spendTotal).toBe(12.34);
   });
 });
 
@@ -994,6 +1102,7 @@ describe('dashboardAgentRunSummarySchema', () => {
         {
           id: 'ai-call-1',
           step: 'refine_highlights',
+          provider: 'openai',
           model: 'gpt-5-mini',
           status: 'completed',
           startedAt: '2026-03-07T12:00:01.000Z',
@@ -1036,6 +1145,7 @@ describe('dashboardAgentRunSummarySchema', () => {
         {
           id: 'ai-call-1',
           step: 'refine_highlights',
+          provider: 'openai',
           model: 'gpt-5-mini',
           status: 'unknown',
           startedAt: '2026-03-07T12:00:01.000Z',

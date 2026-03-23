@@ -7,7 +7,7 @@ This document describes environment setup behavior and expectations.
 
 # Environment Setup Guide
 
-Last verified: 2026-03-14
+Last verified: 2026-03-23
 
 This repository uses `scripts/setup-env.sh` to generate local env files for API, web, worker, and Docker Compose.
 
@@ -50,7 +50,7 @@ Dry run:
 - service discovery toggles
 - local and Compose `DATABASE_URL` / `REDIS_URL`
 
-The script does not generate bundled agents, sample seed data, or an OpenAI API key.
+The script does not generate bundled agents, sample seed data, AI provider secrets, or the OpenAI usage/spend Admin API key.
 
 ## Key Output Variables
 
@@ -96,11 +96,22 @@ The API bootstraps a built-in local admin record automatically on startup. No pa
 
 On first visit, the UI calls `GET /api/auth/setup-status` and prompts you to set the admin password before normal sign-in is enabled.
 
-## OpenAI Provider Key
+## AI Provider And Telemetry Keys
 
-The OpenAI API key is no longer written into `apps/api/.env` or `infra/compose/.env`.
+AI provider secrets are no longer written into `apps/api/.env` or `infra/compose/.env`.
 
-After the first admin login, open **Settings** and configure the key there if you want model-backed AI features. The key is stored separately from the generated env files.
+After the first admin login, open **Settings** and configure the installation-wide AI provider there if you want model-backed AI features.
+
+- `OpenAI`
+  - Save the runtime API key in the `AI Provider` card.
+  - The active model still comes from `OPENAI_MODEL` in the generated env files.
+- `Ollama`
+  - Save the base URL, optional bearer token, and selected model in the `AI Provider` card.
+  - The saved base URL must be reachable from the API runtime.
+    If the API runs in Docker Compose, `http://localhost:11434` only works when Ollama runs in that same container.
+- `OpenAI Usage & Spend`
+  - Save a separate OpenAI Admin API key in the telemetry card if you want cached usage/spend reporting.
+  - The telemetry credential is distinct from the runtime inference key and is not used for chat, summaries, or other AI generation.
 
 ## Next Steps
 
@@ -115,5 +126,6 @@ Then:
 
 - open the UI
 - set the admin password
-- optionally configure the OpenAI API key in Settings
+- optionally configure an AI provider in Settings
+- optionally configure the separate OpenAI usage/spend Admin API key in Settings
 - enroll or install real agents explicitly

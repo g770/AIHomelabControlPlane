@@ -10,12 +10,13 @@ import { ToolProposalsModule } from '../tool-proposals/tool-proposals.module';
 import { AiProviderService } from './ai-provider.service';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { AiUsageService } from './ai-usage.service';
 
 @Module({
   imports: [McpModule, ToolProposalsModule],
   controllers: [AiController],
-  providers: [AiService, AiProviderService],
-  exports: [AiService, AiProviderService],
+  providers: [AiService, AiProviderService, AiUsageService],
+  exports: [AiService, AiProviderService, AiUsageService],
 })
 /**
  * Implements the ai module class.

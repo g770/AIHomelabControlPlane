@@ -12,7 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { McpService } from '../mcp/mcp.service';
 import { ToolProposalsService } from '../tool-proposals/tool-proposals.service';
-import { AiProviderService } from './ai-provider.service';
+import { AiProviderService, type AiRuntimeHandle } from './ai-provider.service';
 import {
   CHAT_MEMORY_COMPACTION_BATCH_MESSAGES,
   CHAT_MEMORY_COMPACTION_TRIGGER_MESSAGES,
@@ -105,7 +105,7 @@ export class AiService {
     private readonly aiProviderService: AiProviderService,
   ) {}
 
-  // Reports whether OpenAI credentials are configured.
+  // Reports whether an AI provider is configured.
   async status() {
     return { enabled: await this.aiProviderService.isConfigured() };
   }
@@ -288,82 +288,71 @@ export class AiService {
     const snapshot = toRecord(latestFact?.snapshot);
     const fallback = buildFallbackHostSummary(host, snapshot, latestFact?.createdAt ?? null);
 
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       return fallback;
     }
 
     const personality = await this.resolveUserPersonality(userId);
 
     try {
-      const response = await openai.responses.create({
-        model: this.aiProviderService.getModel(),
-        input: [
+      const response = await runtime.client.generate({
+        messages: [
           {
             role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text: buildPersonalitySystemPrompt(
-                  [
-                    'You summarize host telemetry for operators.',
-                    'Return valid JSON only, no markdown, no prose outside JSON.',
-                    'Keep each bullet concise and actionable.',
-                    'Do not invent values that are not present in the input.',
-                    'Use this shape exactly:',
-                    JSON.stringify({
-                      overview: ['...'],
-                      sections: {
-                        facts: ['...'],
-                        containers: ['...'],
-                        systemServices: ['...'],
-                        storage: ['...'],
-                        network: ['...'],
-                      },
-                    }),
-                  ].join(' '),
-                  personality,
-                ),
-              },
-            ],
+            content: buildPersonalitySystemPrompt(
+              [
+                'You summarize host telemetry for operators.',
+                'Return valid JSON only, no markdown, no prose outside JSON.',
+                'Keep each bullet concise and actionable.',
+                'Do not invent values that are not present in the input.',
+                'Use this shape exactly:',
+                JSON.stringify({
+                  overview: ['...'],
+                  sections: {
+                    facts: ['...'],
+                    containers: ['...'],
+                    systemServices: ['...'],
+                    storage: ['...'],
+                    network: ['...'],
+                  },
+                }),
+              ].join(' '),
+              personality,
+            ),
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: JSON.stringify({
-                  host: {
-                    id: host.id,
-                    hostname: host.hostname,
-                    status: host.status,
-                    cpuPct: host.cpuPct,
-                    memPct: host.memPct,
-                    diskPct: host.diskPct,
-                    lastSeenAt: host.lastSeenAt ? host.lastSeenAt.toISOString() : null,
-                    services: host.serviceInstances.map((instance) => ({
-                      name: instance.name,
-                      status: instance.status,
-                      endpoint: instance.endpoint,
-                    })),
-                  },
-                  snapshot: {
-                    cpu: snapshot?.cpu ?? null,
-                    memory: snapshot?.memory ?? null,
-                    storage: snapshot?.storage ?? null,
-                    network: snapshot?.network ?? null,
-                    containers: snapshot?.containers ?? null,
-                    systemd: snapshot?.systemd ?? null,
-                  },
-                  factCapturedAt: latestFact?.createdAt ? latestFact.createdAt.toISOString() : null,
-                }),
+            content: JSON.stringify({
+              host: {
+                id: host.id,
+                hostname: host.hostname,
+                status: host.status,
+                cpuPct: host.cpuPct,
+                memPct: host.memPct,
+                diskPct: host.diskPct,
+                lastSeenAt: host.lastSeenAt ? host.lastSeenAt.toISOString() : null,
+                services: host.serviceInstances.map((instance) => ({
+                  name: instance.name,
+                  status: instance.status,
+                  endpoint: instance.endpoint,
+                })),
               },
-            ],
+              snapshot: {
+                cpu: snapshot?.cpu ?? null,
+                memory: snapshot?.memory ?? null,
+                storage: snapshot?.storage ?? null,
+                network: snapshot?.network ?? null,
+                containers: snapshot?.containers ?? null,
+                systemd: snapshot?.systemd ?? null,
+              },
+              factCapturedAt: latestFact?.createdAt ? latestFact.createdAt.toISOString() : null,
+            }),
           },
         ],
       });
 
-      const aiParsed = parseAiHostSummary(response.output_text ?? '');
+      const aiParsed = parseAiHostSummary(response.outputText);
       if (!aiParsed) {
         return fallback;
       }
@@ -580,7 +569,7 @@ export class AiService {
       recentEvents,
       contextHostId,
       traces,
-      hasOpenAi: aiEnabled,
+      aiEnabled,
     };
 
     let answer: string;
@@ -677,17 +666,17 @@ export class AiService {
       recentEvents: Array<Record<string, unknown>>;
       contextHostId?: string;
       traces: Array<Record<string, unknown>>;
-      hasOpenAi: boolean;
+      aiEnabled: boolean;
     },
     proposalId: string | null,
     personality: string,
     history: ChatHistoryContext,
   ) {
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       const suffix = proposalId
         ? `I created write-action proposal ${proposalId}. Approve it before execution.`
-        : 'Configure an OpenAI API key in Settings to enable richer AI responses.';
+        : 'Configure an AI provider in Settings to enable richer AI responses.';
 
       return `AI is disabled. Current state: ${context.hostCount} hosts, ${context.serviceCount} services, ${context.activeAlerts} active alerts. ${suffix}`;
     }
@@ -704,36 +693,25 @@ export class AiService {
       'Keep answers concise and action-oriented.',
     ].join(' ');
 
-    const response = await openai.responses.create({
-      model: this.aiProviderService.getModel(),
-      input: [
+    const response = await runtime.client.generate({
+      messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'input_text',
-              text: buildPersonalitySystemPrompt(systemPrompt, personality),
-            },
-          ],
+          content: buildPersonalitySystemPrompt(systemPrompt, personality),
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: JSON.stringify({
-                message: userMessage,
-                history,
-                context,
-                proposalId,
-              }),
-            },
-          ],
+          content: JSON.stringify({
+            message: userMessage,
+            history,
+            context,
+            proposalId,
+          }),
         },
       ],
     });
 
-    const text = response.output_text?.trim();
+    const text = response.outputText.trim();
     return text && text.length > 0
       ? text
       : 'No model output. Review tool traces and current alerts for next action.';
@@ -1042,8 +1020,8 @@ export class AiService {
       CHAT_MEMORY_RECENT_MESSAGES,
     );
 
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       return { summary, recentTurns };
     }
 
@@ -1080,7 +1058,7 @@ export class AiService {
       return { summary, recentTurns };
     }
 
-    const compacted = await this.summarizeConversationHistoryChunk(summary, chunk, openai);
+    const compacted = await this.summarizeConversationHistoryChunk(summary, chunk, runtime);
     if (!compacted) {
       return { summary, recentTurns };
     }
@@ -1146,62 +1124,47 @@ export class AiService {
   private async summarizeConversationHistoryChunk(
     existingSummary: ChatMemorySummary,
     chunk: Array<{ id: string; role: string; content: string; createdAt: Date }>,
-    openai: {
-      responses: {
-        create: (input: Record<string, unknown>) => Promise<{ output_text?: string | null }>;
-      };
-    },
+    runtime: AiRuntimeHandle,
   ) {
     try {
-      const response = await openai.responses.create({
-        model: this.aiProviderService.getModel(),
-        max_output_tokens: 1_200,
-        input: [
+      const response = await runtime.client.generate({
+        maxOutputTokens: 1_200,
+        messages: [
           {
             role: 'system',
             content: [
-              {
-                type: 'input_text',
-                text: [
-                  'You maintain compact conversation memory for a homelab operations assistant.',
-                  'Return valid JSON only, with no markdown or prose outside JSON.',
-                  'Use exactly this shape:',
-                  JSON.stringify({
-                    facts: ['...'],
-                    decisions: ['...'],
-                    pendingActions: ['...'],
-                    openQuestions: ['...'],
-                    userPreferences: ['...'],
-                    importantIds: ['...'],
-                  }),
-                  'Only include durable context helpful for future turns.',
-                  'Use concise, actionable entries.',
-                  'Never include raw credentials, tokens, API keys, or secrets. Use [REDACTED] when needed.',
-                  'Do not invent facts.',
-                ].join(' '),
-              },
-            ],
+              'You maintain compact conversation memory for a homelab operations assistant.',
+              'Return valid JSON only, with no markdown or prose outside JSON.',
+              'Use exactly this shape:',
+              JSON.stringify({
+                facts: ['...'],
+                decisions: ['...'],
+                pendingActions: ['...'],
+                openQuestions: ['...'],
+                userPreferences: ['...'],
+                importantIds: ['...'],
+              }),
+              'Only include durable context helpful for future turns.',
+              'Use concise, actionable entries.',
+              'Never include raw credentials, tokens, API keys, or secrets. Use [REDACTED] when needed.',
+              'Do not invent facts.',
+            ].join(' '),
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: JSON.stringify({
-                  existingSummary,
-                  newMessages: chunk.map((message) => ({
-                    role: message.role === 'ASSISTANT' ? 'assistant' : 'user',
-                    content: sanitizeChatMemoryText(message.content),
-                    createdAt: message.createdAt.toISOString(),
-                  })),
-                }),
-              },
-            ],
+            content: JSON.stringify({
+              existingSummary,
+              newMessages: chunk.map((message) => ({
+                role: message.role === 'ASSISTANT' ? 'assistant' : 'user',
+                content: sanitizeChatMemoryText(message.content),
+                createdAt: message.createdAt.toISOString(),
+              })),
+            }),
           },
         ],
       });
 
-      return parseChatMemorySummary(response.output_text ?? '');
+      return parseChatMemorySummary(response.outputText);
     } catch {
       return null;
     }

@@ -100,8 +100,7 @@ describe('AlertsService', () => {
     send: vi.fn(),
   };
   const aiProviderService = {
-    getClient: vi.fn(),
-    getModel: vi.fn(() => 'gpt-5-mini'),
+    getRuntime: vi.fn(),
   };
 
   let prisma: ReturnType<typeof createPrismaMock>;
@@ -117,7 +116,7 @@ describe('AlertsService', () => {
     prisma.service.count.mockResolvedValue(0);
     prisma.check.count.mockResolvedValue(0);
     prisma.alertEvent.count.mockResolvedValue(0);
-    aiProviderService.getClient.mockResolvedValue(null);
+    aiProviderService.getRuntime.mockResolvedValue(null);
 
     service = new AlertsService(
       prisma as never,

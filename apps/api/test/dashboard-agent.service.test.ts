@@ -54,16 +54,20 @@ function createService(openAiEnabled = false) {
     callTool: vi.fn(),
   };
   const aiProviderService = {
-    getClient: vi.fn().mockResolvedValue(
+    getRuntime: vi.fn().mockResolvedValue(
       openAiEnabled
         ? {
-            responses: {
-              create: vi.fn(),
+            provider: 'openai',
+            model: 'gpt-5-mini',
+            client: {
+              capabilities: {
+                reasoningSummary: true,
+              },
+              generate: vi.fn(),
             },
           }
         : null,
     ),
-    getModel: vi.fn(() => 'gpt-5-mini'),
     isConfigured: vi.fn().mockResolvedValue(openAiEnabled),
   };
 
@@ -106,6 +110,7 @@ function makeRunSummaryWithDebug() {
       {
         id: 'ai-call-1',
         step: 'refine_highlights',
+        provider: 'openai',
         model: 'gpt-5-mini',
         status: 'completed',
         startedAt: '2026-03-07T12:00:01.000Z',
@@ -215,33 +220,28 @@ describe('DashboardAgentService openai debug traces', () => {
 
   it('captures completed openai debug call with reasoning summary and usage', async () => {
     const { service, aiProviderService } = createService(true);
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          id: 'resp_123',
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        capabilities: {
+          reasoningSummary: true,
+        },
+        generate: vi.fn().mockResolvedValue({
+          provider: 'openai',
           model: 'gpt-5-mini',
+          requestId: 'resp_123',
           status: 'completed',
-          output_text: '{"highlights":[]}',
-          output: [
-            {
-              type: 'reasoning',
-              summary: [
-                {
-                  type: 'summary_text',
-                  text: 'Compared monitor failures against event bursts.',
-                },
-              ],
-            },
-          ],
+          finishReason: 'stop',
+          outputText: '{"highlights":[]}',
+          reasoningSummary: ['Compared monitor failures against event bursts.'],
           usage: {
-            input_tokens: 240,
-            output_tokens: 60,
-            total_tokens: 300,
-            output_tokens_details: {
-              reasoning_tokens: 22,
-            },
+            inputTokens: 240,
+            outputTokens: 60,
+            reasoningTokens: 22,
+            totalTokens: 300,
           },
-          error: null,
+          debug: null,
         }),
       },
     });
@@ -264,6 +264,7 @@ describe('DashboardAgentService openai debug traces', () => {
     expect(openAiCalls).toHaveLength(1);
     expect(openAiCalls[0]).toMatchObject({
       status: 'completed',
+      provider: 'openai',
       model: 'gpt-5-mini',
     });
     expect(openAiCalls[0]?.reasoningSummary).toEqual([
@@ -279,13 +280,20 @@ describe('DashboardAgentService openai debug traces', () => {
 
   it('tolerates wrapped JSON and coerces near-miss highlight fields', async () => {
     const { service, aiProviderService } = createService(true);
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          id: 'resp_wrapped',
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        capabilities: {
+          reasoningSummary: true,
+        },
+        generate: vi.fn().mockResolvedValue({
+          provider: 'openai',
           model: 'gpt-5-mini',
+          requestId: 'resp_wrapped',
           status: 'completed',
-          output_text: [
+          finishReason: 'stop',
+          outputText: [
             'Here is the requested JSON:',
             '```json',
             JSON.stringify({
@@ -302,9 +310,9 @@ describe('DashboardAgentService openai debug traces', () => {
             }),
             '```',
           ].join('\n'),
-          output: [],
+          reasoningSummary: [],
           usage: null,
-          error: null,
+          debug: null,
         }),
       },
     });
@@ -338,16 +346,23 @@ describe('DashboardAgentService openai debug traces', () => {
 
   it('captures invalid output debug calls and redacts sensitive payload strings', async () => {
     const { service, aiProviderService } = createService(true);
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockResolvedValue({
-          id: 'resp_invalid',
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        capabilities: {
+          reasoningSummary: true,
+        },
+        generate: vi.fn().mockResolvedValue({
+          provider: 'openai',
           model: 'gpt-5-mini',
+          requestId: 'resp_invalid',
           status: 'completed',
-          output_text: '{}',
-          output: [],
+          finishReason: 'stop',
+          outputText: '{}',
+          reasoningSummary: [],
           usage: null,
-          error: null,
+          debug: null,
         }),
       },
     });
@@ -377,9 +392,14 @@ describe('DashboardAgentService openai debug traces', () => {
 
   it('captures failed openai debug calls when the request throws', async () => {
     const { service, aiProviderService } = createService(true);
-    aiProviderService.getClient.mockResolvedValueOnce({
-      responses: {
-        create: vi.fn().mockRejectedValue(new Error('upstream timeout password=supersecret')),
+    aiProviderService.getRuntime.mockResolvedValueOnce({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      client: {
+        capabilities: {
+          reasoningSummary: true,
+        },
+        generate: vi.fn().mockRejectedValue(new Error('upstream timeout password=supersecret')),
       },
     });
 

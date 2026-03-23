@@ -82,6 +82,7 @@ function mockDashboardAgentRequests() {
                     {
                       id: 'ai-call-1',
                       step: 'refine_highlights',
+                      provider: 'openai',
                       model: 'gpt-5-mini',
                       status: 'completed',
                       startedAt: '2026-03-07T12:00:01.000Z',
@@ -189,6 +190,7 @@ function mockDashboardAgentRequests() {
               {
                 id: 'ai-call-1',
                 step: 'refine_highlights',
+                provider: 'openai',
                 model: 'gpt-5-mini',
                 status: 'completed',
                 startedAt: '2026-03-07T12:00:01.000Z',
@@ -260,7 +262,7 @@ describe('DashboardAgentPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('OpenAI Debug Console')).toBeInTheDocument();
+    expect(await screen.findByText('AI Debug Console')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand Debug Console' })).toBeInTheDocument();
     expect(screen.queryByText('Request Payload')).not.toBeInTheDocument();
 
@@ -277,7 +279,7 @@ describe('DashboardAgentPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('OpenAI Debug Console')).toBeInTheDocument();
+    expect(await screen.findByText('AI Debug Console')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /^Delete$/i })).toBeInTheDocument();
     expect(screen.queryByText('Request Payload')).not.toBeInTheDocument();
   });

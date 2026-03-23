@@ -1433,14 +1433,39 @@ export const aiPersonalitySchema = z
   .strict();
 
 /**
+ * Implements ai provider id schema.
+ */
+export const aiProviderIdSchema = z.enum(['openai', 'ollama']);
+
+const aiProjectIdSchema = z.string().trim().min(1).max(120);
+
+/**
  * Implements ai provider config update schema.
  */
-export const aiProviderConfigUpdateSchema = z
-  .object({
-    confirm: z.literal(true),
-    apiKey: z.string().min(1).max(4096).nullable(),
-  })
-  .strict();
+export const aiProviderConfigUpdateSchema = z.discriminatedUnion('provider', [
+  z
+    .object({
+      confirm: z.literal(true),
+      provider: z.literal('openai'),
+      apiKey: z.string().min(1).max(4096),
+    })
+    .strict(),
+  z
+    .object({
+      confirm: z.literal(true),
+      provider: z.literal('ollama'),
+      baseUrl: z.string().trim().min(1).max(1024),
+      model: z.string().trim().min(1).max(200),
+      apiKey: z.string().min(1).max(4096).nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      confirm: z.literal(true),
+      provider: z.literal('none'),
+    })
+    .strict(),
+]);
 
 /**
  * Implements ai provider config response schema.
@@ -1448,8 +1473,230 @@ export const aiProviderConfigUpdateSchema = z
 export const aiProviderConfigResponseSchema = z
   .object({
     configured: z.boolean(),
-    model: z.string(),
+    provider: aiProviderIdSchema.nullable(),
+    model: z.string().nullable(),
     updatedAt: z.string().datetime().nullable(),
+    openai: z
+      .object({
+        apiKeyConfigured: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    ollama: z
+      .object({
+        baseUrl: z.string(),
+        apiKeyConfigured: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+/**
+ * Implements ai provider model info schema.
+ */
+export const aiProviderModelInfoSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    modifiedAt: z.string().datetime().nullable(),
+    sizeBytes: z.number().int().nonnegative().nullable(),
+    family: z.string().nullable(),
+    parameterSize: z.string().nullable(),
+    quantizationLevel: z.string().nullable(),
+  })
+  .strict();
+
+/**
+ * Implements ai provider models response schema.
+ */
+export const aiProviderModelsResponseSchema = z
+  .object({
+    provider: aiProviderIdSchema,
+    supported: z.boolean(),
+    fetchedAt: z.string().datetime(),
+    models: z.array(aiProviderModelInfoSchema),
+  })
+  .strict();
+
+const aiUsageRefreshErrorSchema = z
+  .object({
+    message: z.string().min(1).max(500),
+    occurredAt: z.string().datetime(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage telemetry config response schema.
+ */
+export const aiUsageTelemetryConfigResponseSchema = z
+  .object({
+    configured: z.boolean(),
+    projectIds: z.array(aiProjectIdSchema).max(50),
+    updatedAt: z.string().datetime().nullable(),
+    lastRefreshAttemptAt: z.string().datetime().nullable(),
+    lastRefreshSucceededAt: z.string().datetime().nullable(),
+    lastRefreshError: aiUsageRefreshErrorSchema.nullable(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage telemetry config update schema.
+ */
+export const aiUsageTelemetryConfigUpdateSchema = z
+  .object({
+    confirm: z.literal(true),
+    adminApiKey: z.string().min(1).max(4096).nullable(),
+    projectIds: z.array(aiProjectIdSchema).max(50).default([]),
+  })
+  .strict();
+
+/**
+ * Implements ai usage window days schema.
+ */
+export const aiUsageWindowDaysSchema = z.union([z.literal(7), z.literal(30), z.literal(90)]);
+
+/**
+ * Implements ai usage refresh request schema.
+ */
+export const aiUsageRefreshRequestSchema = z
+  .object({
+    confirm: z.literal(true),
+  })
+  .strict();
+
+/**
+ * Implements ai usage spend series row schema.
+ */
+export const aiUsageSpendSeriesRowSchema = z
+  .object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    amount: z.number().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage daily usage row schema.
+ */
+export const aiUsageDailyUsageRowSchema = z
+  .object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    requests: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage model breakdown row schema.
+ */
+export const aiUsageModelBreakdownRowSchema = z
+  .object({
+    label: z.string().nullable(),
+    requests: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage project breakdown row schema.
+ */
+export const aiUsageProjectBreakdownRowSchema = z
+  .object({
+    label: z.string().nullable(),
+    spend: z.number().nonnegative(),
+    requests: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage line item breakdown row schema.
+ */
+export const aiUsageLineItemBreakdownRowSchema = z
+  .object({
+    label: z.string().nullable(),
+    amount: z.number().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage summary snapshot schema.
+ */
+export const aiUsageSummarySnapshotSchema = z
+  .object({
+    source: z.literal('openai_admin_api'),
+    coverage: z
+      .object({
+        spendSource: z.literal('organization.costs'),
+        usageSources: z.array(z.literal('organization.usage.completions')).min(1),
+        usageScope: z.literal('text_generation'),
+      })
+      .strict(),
+    windowDays: aiUsageWindowDaysSchema,
+    scope: z
+      .object({
+        projectIds: z.array(aiProjectIdSchema).max(50),
+      })
+      .strict(),
+    syncedAt: z.string().datetime(),
+    currency: z.string().trim().min(1).max(16),
+    totals: z
+      .object({
+        spendTotal: z.number().nonnegative(),
+        spendToday: z.number().nonnegative(),
+        spendMonthToDate: z.number().nonnegative(),
+        requests: z.number().int().nonnegative(),
+        inputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+        cachedInputTokens: z.number().int().nonnegative(),
+      })
+      .strict(),
+    series: z
+      .object({
+        dailySpend: z.array(aiUsageSpendSeriesRowSchema),
+        dailyUsage: z.array(aiUsageDailyUsageRowSchema),
+      })
+      .strict(),
+    breakdowns: z
+      .object({
+        byModel: z.array(aiUsageModelBreakdownRowSchema),
+        byProject: z.array(aiUsageProjectBreakdownRowSchema),
+        byLineItem: z.array(aiUsageLineItemBreakdownRowSchema),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage summary response schema.
+ */
+export const aiUsageSummaryResponseSchema = z
+  .object({
+    configured: z.boolean(),
+    projectIds: z.array(aiProjectIdSchema).max(50),
+    windowDays: aiUsageWindowDaysSchema,
+    lastRefreshAttemptAt: z.string().datetime().nullable(),
+    lastRefreshSucceededAt: z.string().datetime().nullable(),
+    lastRefreshError: aiUsageRefreshErrorSchema.nullable(),
+    snapshot: aiUsageSummarySnapshotSchema.nullable(),
+  })
+  .strict();
+
+/**
+ * Implements ai usage refresh response schema.
+ */
+export const aiUsageRefreshResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    syncedAt: z.string().datetime().nullable(),
+    lastRefreshAttemptAt: z.string().datetime(),
+    lastRefreshSucceededAt: z.string().datetime().nullable(),
+    lastRefreshError: aiUsageRefreshErrorSchema.nullable(),
   })
   .strict();
 
@@ -2120,6 +2367,7 @@ export const dashboardAgentOpenAiCallSchema = z
   .object({
     id: z.string().min(1).max(80),
     step: z.string().min(1).max(80),
+    provider: aiProviderIdSchema,
     model: z.string().min(1).max(120),
     status: dashboardAgentOpenAiCallStatusSchema,
     startedAt: z.string().datetime(),
@@ -2673,6 +2921,10 @@ export type AiPersonalityUpdate = z.infer<typeof aiPersonalityUpdateSchema>;
  */
 export type AiPersonality = z.infer<typeof aiPersonalitySchema>;
 /**
+ * Describes the ai provider id shape.
+ */
+export type AiProviderId = z.infer<typeof aiProviderIdSchema>;
+/**
  * Describes the ai provider config update shape.
  */
 export type AiProviderConfigUpdate = z.infer<typeof aiProviderConfigUpdateSchema>;
@@ -2680,6 +2932,38 @@ export type AiProviderConfigUpdate = z.infer<typeof aiProviderConfigUpdateSchema
  * Describes the ai provider config response shape.
  */
 export type AiProviderConfigResponse = z.infer<typeof aiProviderConfigResponseSchema>;
+/**
+ * Describes the ai provider models response shape.
+ */
+export type AiProviderModelsResponse = z.infer<typeof aiProviderModelsResponseSchema>;
+/**
+ * Describes the ai usage telemetry config response shape.
+ */
+export type AiUsageTelemetryConfigResponse = z.infer<typeof aiUsageTelemetryConfigResponseSchema>;
+/**
+ * Describes the ai usage telemetry config update shape.
+ */
+export type AiUsageTelemetryConfigUpdate = z.infer<typeof aiUsageTelemetryConfigUpdateSchema>;
+/**
+ * Describes the ai usage window days shape.
+ */
+export type AiUsageWindowDays = z.infer<typeof aiUsageWindowDaysSchema>;
+/**
+ * Describes the ai usage summary snapshot shape.
+ */
+export type AiUsageSummarySnapshot = z.infer<typeof aiUsageSummarySnapshotSchema>;
+/**
+ * Describes the ai usage summary response shape.
+ */
+export type AiUsageSummaryResponse = z.infer<typeof aiUsageSummaryResponseSchema>;
+/**
+ * Describes the ai usage refresh request shape.
+ */
+export type AiUsageRefreshRequest = z.infer<typeof aiUsageRefreshRequestSchema>;
+/**
+ * Describes the ai usage refresh response shape.
+ */
+export type AiUsageRefreshResponse = z.infer<typeof aiUsageRefreshResponseSchema>;
 /**
  * Describes the notification route type shape.
  */

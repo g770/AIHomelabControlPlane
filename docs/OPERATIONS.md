@@ -7,7 +7,7 @@ This document describes operations behavior and expectations.
 
 # Operations
 
-Last verified: 2026-03-13
+Last verified: 2026-03-23
 
 ## Maintenance Windows
 
@@ -31,6 +31,30 @@ Recommended:
 3. Use AI page for diagnostics and proposal drafting.
 4. Approve write tools only after reviewing expected effect.
 5. Validate recovery via checks and close alerts.
+
+## AI Provider Operations
+
+Settings now supports one active installation-wide AI provider at a time.
+
+- OpenAI runtime access uses the API key stored in `Settings > AI Provider` and the env-driven `OPENAI_MODEL`.
+- Ollama runtime access uses the saved base URL, optional bearer token, and selected model from `Settings > AI Provider`.
+- Ollama save-time validation checks reachability, minimum version support, and model availability before activation.
+- Ollama model discovery is read-only. If discovery fails later, the saved provider remains active and operators can retry discovery or keep the manual model value.
+- If the API runs in Docker, the saved Ollama base URL must be reachable from the API container, not just from the browser.
+
+## OpenAI Usage And Spend
+
+The `OpenAI Usage & Spend` card uses a separate OpenAI Admin API key and cached telemetry snapshots.
+
+- Refresh is explicit. `GET` routes stay read-only and do not mutate the cached snapshot.
+- Failed refreshes do not clear the last successful snapshot. Settings shows the stale snapshot with a warning banner and safe error summary.
+- Org-wide spend can include non-text usage that does not reconcile with text-model request and token totals.
+- If you need tighter reconciliation, scope telemetry to the OpenAI project IDs used by this installation.
+- Common refresh failures:
+  - invalid Admin API key or missing admin privileges
+  - empty or incorrect project scope
+  - upstream rate limits or pagination failures
+  - upstream OpenAI availability issues
 
 ## SSH Terminal Troubleshooting
 

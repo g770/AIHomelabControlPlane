@@ -93,8 +93,7 @@ describe('ServiceDiscoveryService', () => {
     emit: vi.fn(),
   };
   const aiProviderService = {
-    getClient: vi.fn(),
-    getModel: vi.fn(() => 'gpt-5-mini'),
+    getRuntime: vi.fn().mockResolvedValue(null),
   };
 
   let service: ServiceDiscoveryService;

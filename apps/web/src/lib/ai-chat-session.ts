@@ -226,7 +226,7 @@ export async function sendAiChatMessage(input: { message: string }) {
                 {
                   role: 'assistant',
                   content:
-                    'No assistant output was returned. Check API logs for /api/ai/chat and confirm the OpenAI API key is configured in Settings if model responses are expected.',
+                    'No assistant output was returned. Check API logs for /api/ai/chat and confirm an AI provider is configured in Settings if model responses are expected.',
                 },
               ]),
             };

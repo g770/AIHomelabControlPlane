@@ -2707,14 +2707,14 @@ export class ServiceDiscoveryService {
   }> {
     const aiEnabled = this.configService.get<boolean>('DISCOVERY_AI_ENABLED', true);
     const ttlSec = this.configService.get<number>('DISCOVERY_AI_CATALOG_TTL_SEC', 86_400);
-    const openai = await this.aiProviderService.getClient();
+    const runtime = await this.aiProviderService.getRuntime();
 
-    if (!aiEnabled || !openai) {
+    if (!aiEnabled || !runtime) {
       return {
         signatures: BUILTIN_DISCOVERY_SIGNATURES,
         source: 'BUILTIN',
         expiresAt: new Date(Date.now() + ttlSec * 1_000),
-        lastError: aiEnabled ? 'OpenAI unavailable' : null,
+        lastError: aiEnabled ? 'AI provider unavailable' : null,
       };
     }
 
@@ -2739,7 +2739,7 @@ export class ServiceDiscoveryService {
     }
 
     try {
-      const generated = await this.generateAiCatalog(openai);
+      const generated = await this.generateAiCatalog(runtime);
       const merged = mergeServiceDiscoverySignatures(BUILTIN_DISCOVERY_SIGNATURES, generated);
 
       await this.prisma.serviceDiscoveryCatalog.upsert({
@@ -2796,57 +2796,47 @@ export class ServiceDiscoveryService {
     }
   }
 
-  private async generateAiCatalog(openai: {
-    responses: {
-      create: (input: Record<string, unknown>) => Promise<{ output_text?: string | null }>;
-    };
-  }) {
-    const response = await openai.responses.create({
-      model: this.aiProviderService.getModel(),
-      input: [
+  private async generateAiCatalog(runtime: NonNullable<Awaited<ReturnType<AiProviderService['getRuntime']>>>) {
+    const response = await runtime.client.generate({
+      maxOutputTokens: 2_000,
+      messages: [
         {
           role: 'system',
           content: [
-            {
-              type: 'input_text',
-              text: [
-                'Return valid JSON only with no markdown.',
-                'Provide homelab service discovery signatures.',
-                'Each signature must be safe for agent-local probing only.',
-                'Do not include arbitrary commands or external scan instructions.',
-                'JSON shape:',
-                JSON.stringify({
-                  services: [
+            'Return valid JSON only with no markdown.',
+            'Provide homelab service discovery signatures.',
+            'Each signature must be safe for agent-local probing only.',
+            'Do not include arbitrary commands or external scan instructions.',
+            'JSON shape:',
+            JSON.stringify({
+              services: [
+                {
+                  id: 'service-id',
+                  name: 'Service Name',
+                  aliases: ['alias'],
+                  systemdHints: ['unit-name'],
+                  containerHints: ['image-or-name'],
+                  processHints: ['process-name'],
+                  tags: ['category'],
+                  probes: [
                     {
-                      id: 'service-id',
-                      name: 'Service Name',
-                      aliases: ['alias'],
-                      systemdHints: ['unit-name'],
-                      containerHints: ['image-or-name'],
-                      processHints: ['process-name'],
-                      tags: ['category'],
-                      probes: [
-                        {
-                          protocol: 'http',
-                          ports: [80],
-                          path: '/',
-                          statusCodes: [200],
-                          bodyContains: ['marker'],
-                          headersContain: ['header-marker'],
-                        },
-                      ],
+                      protocol: 'http',
+                      ports: [80],
+                      path: '/',
+                      statusCodes: [200],
+                      bodyContains: ['marker'],
+                      headersContain: ['header-marker'],
                     },
                   ],
-                }),
-              ].join(' '),
-            },
-          ],
+                },
+              ],
+            }),
+          ].join(' '),
         },
       ],
-      max_output_tokens: 2_000,
     });
 
-    const output = (response.output_text ?? '').trim();
+    const output = response.outputText.trim();
     if (!output || output.length > AI_CATALOG_MAX_BYTES) {
       throw new Error('AI catalog output is empty or too large');
     }

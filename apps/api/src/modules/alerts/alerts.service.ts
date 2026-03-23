@@ -206,7 +206,7 @@ type EvaluationCache = {
   homelabMetrics: Map<string, number>;
 };
 
-const OPEN_ALERT_STATUSES = [AlertEventStatus.PENDING, AlertEventStatus.FIRING];
+const OPEN_ALERT_STATUSES: AlertEventStatus[] = [AlertEventStatus.PENDING, AlertEventStatus.FIRING];
 
 const defaultRuleDraft: AlertRuleDraft = {
   name: 'CPU saturation',
@@ -724,8 +724,8 @@ export class AlertsService {
   ): Promise<AlertParseResponse> {
     const references = await this.loadParseReferences();
     const fallback = this.buildHeuristicDraft(input, references);
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       return {
         aiEnabled: false,
         generatedByAi: false,
@@ -737,58 +737,47 @@ export class AlertsService {
     }
 
     try {
-      const response = await openai.responses.create({
-        model: this.aiProviderService.getModel(),
-        input: [
+      const response = await runtime.client.generate({
+        messages: [
           {
             role: 'system',
             content: [
-              {
-                type: 'input_text',
-                text: [
-                  'You convert operator English into structured alert-rule drafts.',
-                  'Return valid JSON only and no markdown.',
-                  'Use the draft shape exactly.',
-                  JSON.stringify({
-                    draft: {
-                      name: 'CPU saturation',
-                      description: 'Alert when any host stays above 85% CPU for 5 minutes.',
-                      enabled: false,
-                      spec: defaultRuleDraft.spec,
-                    },
-                    rationale: 'One sentence explanation.',
-                    confidence: 0,
-                  }),
-                  'Keep drafts disabled.',
-                  'Only use entity ids supplied in the context.',
-                  'Use routeIds only when a route is explicitly referenced in the request or context.',
-                ].join(' '),
-              },
-            ],
+              'You convert operator English into structured alert-rule drafts.',
+              'Return valid JSON only and no markdown.',
+              'Use the draft shape exactly.',
+              JSON.stringify({
+                draft: {
+                  name: 'CPU saturation',
+                  description: 'Alert when any host stays above 85% CPU for 5 minutes.',
+                  enabled: false,
+                  spec: defaultRuleDraft.spec,
+                },
+                rationale: 'One sentence explanation.',
+                confidence: 0,
+              }),
+              'Keep drafts disabled.',
+              'Only use entity ids supplied in the context.',
+              'Use routeIds only when a route is explicitly referenced in the request or context.',
+            ].join(' '),
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: JSON.stringify({
-                  description: input.description,
-                  selectedHostId: input.hostId ?? null,
-                  selectedServiceId: input.serviceId ?? null,
-                  selectedCheckId: input.checkId ?? null,
-                  knownHosts: references.hosts.slice(0, 80),
-                  knownServices: references.services.slice(0, 80),
-                  knownChecks: references.checks.slice(0, 80),
-                  notificationRoutes: references.routes.slice(0, 40),
-                  fallbackDraft: fallback,
-                }),
-              },
-            ],
+            content: JSON.stringify({
+              description: input.description,
+              selectedHostId: input.hostId ?? null,
+              selectedServiceId: input.serviceId ?? null,
+              selectedCheckId: input.checkId ?? null,
+              knownHosts: references.hosts.slice(0, 80),
+              knownServices: references.services.slice(0, 80),
+              knownChecks: references.checks.slice(0, 80),
+              notificationRoutes: references.routes.slice(0, 40),
+              fallbackDraft: fallback,
+            }),
           },
         ],
       });
 
-      const parsed = parseAiAlertDraft(response.output_text ?? '');
+      const parsed = parseAiAlertDraft(response.outputText);
       if (!parsed) {
         return {
           aiEnabled: true,

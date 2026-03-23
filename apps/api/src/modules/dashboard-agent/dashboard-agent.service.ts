@@ -49,8 +49,6 @@ const OPENAI_DEBUG_MAX_ARRAY_ITEMS = 80;
 const OPENAI_DEBUG_MAX_OBJECT_KEYS = 80;
 const OPENAI_DEBUG_MAX_STRING_LENGTH = 1_600;
 const OPENAI_DEBUG_MAX_OUTPUT_TEXT = 12_000;
-const OPENAI_DEBUG_REASONING_LIMIT = 20;
-const OPENAI_DEBUG_REASONING_LINE_MAX = 1_200;
 
 const debugSecretKeyMarkers = [
   'token',
@@ -1051,110 +1049,101 @@ export class DashboardAgentService {
       return highlights;
     }
 
-    const openai = await this.aiProviderService.getClient();
-    if (!openai) {
+    const runtime = await this.aiProviderService.getRuntime();
+    if (!runtime) {
       return highlights;
     }
 
-    const model = this.aiProviderService.getModel();
+    const model = runtime.model;
     const resolvedPersonality =
       personality.trim().length > 0 ? personality.trim() : DEFAULT_DASHBOARD_AGENT_PERSONALITY;
+    const reasoningSummary: 'auto' | 'none' = runtime.client.capabilities.reasoningSummary
+      ? 'auto'
+      : 'none';
     const requestPayload = {
       model,
-      reasoning: {
-        summary: 'auto' as const,
-      },
-      input: [
+      reasoningSummary,
+      messages: [
         {
           role: 'system' as const,
           content: [
-            {
-              type: 'input_text' as const,
-              text: [
-                'You produce read-only homelab triage summaries.',
-                'Return strict JSON only. No markdown.',
-                'Do not suggest executing write actions directly.',
-                'Prioritize findings requiring operator attention.',
-                `Style preferences: ${resolvedPersonality}`,
-                'Output schema:',
-                JSON.stringify({
-                  notes: ['string'],
-                  highlights: [
-                    {
-                      id: 'uuid-or-stable-id',
-                      title: 'string',
-                      summary: 'string',
-                      severity: 'info|warn|critical',
-                      category: 'monitor|host|service-discovery|event|ai-activity|system',
-                      confidence: 0.8,
-                      evidence: ['string'],
-                      investigation: ['string'],
-                      recommendedActions: ['string'],
-                      references: {
-                        hostId: 'uuid-optional',
-                        monitorId: 'uuid-optional',
-                        discoveryRunId: 'uuid-optional',
-                      },
-                    },
-                  ],
-                }),
-              ].join(' '),
-            },
-          ],
+            'You produce read-only homelab triage summaries.',
+            'Return strict JSON only. No markdown.',
+            'Do not suggest executing write actions directly.',
+            'Prioritize findings requiring operator attention.',
+            `Style preferences: ${resolvedPersonality}`,
+            'Output schema:',
+            JSON.stringify({
+              notes: ['string'],
+              highlights: [
+                {
+                  id: 'uuid-or-stable-id',
+                  title: 'string',
+                  summary: 'string',
+                  severity: 'info|warn|critical',
+                  category: 'monitor|host|service-discovery|event|ai-activity|system',
+                  confidence: 0.8,
+                  evidence: ['string'],
+                  investigation: ['string'],
+                  recommendedActions: ['string'],
+                  references: {
+                    hostId: 'uuid-optional',
+                    monitorId: 'uuid-optional',
+                    discoveryRunId: 'uuid-optional',
+                  },
+                },
+              ],
+            }),
+          ].join(' '),
         },
         {
           role: 'user' as const,
-          content: [
-            {
-              type: 'input_text' as const,
-              text: JSON.stringify({
-                context: {
-                  snapshot: context.homelabSnapshot,
-                  discoveryRuns: context.discoveryRuns.slice(0, 5),
-                  monitorCount: context.monitorResults.length,
-                  hostCount: context.hostMetrics.length,
-                  errorEventsLast24h: context.events.filter((event) => event.severity === 'ERROR')
-                    .length,
-                  aiQuestionsLast72h: context.aiQuestions.length,
-                },
-                draftHighlights: highlights,
-              }),
+          content: JSON.stringify({
+            context: {
+              snapshot: context.homelabSnapshot,
+              discoveryRuns: context.discoveryRuns.slice(0, 5),
+              monitorCount: context.monitorResults.length,
+              hostCount: context.hostMetrics.length,
+              errorEventsLast24h: context.events.filter((event) => event.severity === 'ERROR')
+                .length,
+              aiQuestionsLast72h: context.aiQuestions.length,
             },
-          ],
+            draftHighlights: highlights,
+          }),
         },
       ],
     };
     const startedAt = new Date();
 
     try {
-      const response = await openai.responses.create(requestPayload);
+      const response = await runtime.client.generate(requestPayload);
       const finishedAt = new Date();
-      const reasoningSummary = extractReasoningSummary(response.output);
-      const usage = toOpenAiUsageSnapshot(response.usage);
-      const outputText = response.output_text
-        ? sanitizeDebugString(response.output_text, OPENAI_DEBUG_MAX_OUTPUT_TEXT)
+      const outputText = response.outputText
+        ? sanitizeDebugString(response.outputText, OPENAI_DEBUG_MAX_OUTPUT_TEXT)
         : null;
       const baseEntry = {
-        id: response.id || randomUUID(),
+        id: response.requestId || randomUUID(),
         step: 'refine_highlights',
+        provider: runtime.provider,
         model,
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString(),
         durationMs: finishedAt.getTime() - startedAt.getTime(),
         requestPayload: sanitizeDebugValue(requestPayload),
         responsePayload: sanitizeDebugValue({
-          id: response.id,
+          requestId: response.requestId,
+          provider: response.provider,
           model: response.model,
           status: response.status ?? null,
-          error: response.error,
-          output: response.output,
+          finishReason: response.finishReason,
+          debug: response.debug,
         }),
         outputText,
-        reasoningSummary,
-        usage,
+        reasoningSummary: response.reasoningSummary,
+        usage: response.usage,
       } as const;
 
-      const candidate = parseAiRefinementResponse(response.output_text ?? '', highlights);
+      const candidate = parseAiRefinementResponse(response.outputText, highlights);
       if (!candidate.success) {
         const errorDetails = candidate.error;
         toolCalls.push({
@@ -1203,6 +1192,7 @@ export class DashboardAgentService {
         dashboardAgentOpenAiCallSchema.parse({
           id: `ai-call-${randomUUID()}`,
           step: 'refine_highlights',
+          provider: runtime?.provider ?? 'openai',
           model,
           status: 'failed',
           startedAt: startedAt.toISOString(),
@@ -1577,61 +1567,6 @@ function stripOpenAiCallsFromSummary(value: Prisma.JsonValue | null) {
 }
 
 /**
- * Implements extract reasoning summary.
- */
-function extractReasoningSummary(output: unknown) {
-  if (!Array.isArray(output)) {
-    return [] as string[];
-  }
-
-  const summaryLines: string[] = [];
-  for (const item of output) {
-    const record = toRecord(item);
-    if (!record || record.type !== 'reasoning' || !Array.isArray(record.summary)) {
-      continue;
-    }
-
-    for (const part of record.summary) {
-      const summaryPart = toRecord(part);
-      if (!summaryPart || typeof summaryPart.text !== 'string') {
-        continue;
-      }
-      const sanitized = sanitizeDebugString(
-        summaryPart.text,
-        OPENAI_DEBUG_REASONING_LINE_MAX,
-      ).trim();
-      if (!sanitized) {
-        continue;
-      }
-      summaryLines.push(sanitized);
-      if (summaryLines.length >= OPENAI_DEBUG_REASONING_LIMIT) {
-        return summaryLines;
-      }
-    }
-  }
-
-  return summaryLines;
-}
-
-/**
- * Implements to open ai usage snapshot.
- */
-function toOpenAiUsageSnapshot(usage: unknown): DashboardAgentOpenAiCall['usage'] {
-  const usageRecord = toRecord(usage);
-  if (!usageRecord) {
-    return null;
-  }
-
-  const outputDetails = toRecord(usageRecord.output_tokens_details);
-  return {
-    inputTokens: toNonNegativeIntOrNull(usageRecord.input_tokens),
-    outputTokens: toNonNegativeIntOrNull(usageRecord.output_tokens),
-    reasoningTokens: toNonNegativeIntOrNull(outputDetails?.reasoning_tokens),
-    totalTokens: toNonNegativeIntOrNull(usageRecord.total_tokens),
-  };
-}
-
-/**
  * Implements extract top process summary.
  */
 function extractTopProcessSummary(raw: Record<string, unknown>) {
@@ -1926,17 +1861,6 @@ function coerceNumber(value: unknown) {
   }
 
   return null;
-}
-
-/**
- * Implements to non negative int or null.
- */
-function toNonNegativeIntOrNull(value: unknown) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return null;
-  }
-  const rounded = Math.round(value);
-  return rounded >= 0 ? rounded : null;
 }
 
 /**

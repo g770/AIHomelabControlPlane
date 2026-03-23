@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UiThemeSettings } from '@homelab/shared';
+import type { AiUsageWindowDays, UiThemeSettings } from '@homelab/shared';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,11 @@ import {
 import { PageSkeleton } from '@/components/page-skeleton';
 import type {
   AiProviderConfigResponse,
+  AiProviderId,
+  AiProviderModelsResponse,
+  AiUsageRefreshResponse,
+  AiUsageSummaryResponse,
+  AiUsageTelemetryConfigResponse,
   DashboardAgentConfigResponse,
   IntegrationDeleteResponse,
   NotificationRouteSummary,
@@ -41,6 +46,10 @@ type ProxmoxIntegrationDraft = {
   allowInsecureTls: boolean;
   enabled: boolean;
 };
+
+type AiProviderSelection = AiProviderId;
+
+const defaultOllamaBaseUrl = 'http://localhost:11434';
 
 /**
  * Creates default proxmox integration draft.
@@ -70,6 +79,26 @@ function buildIntegrationDeleteStatus(name: string, result: IntegrationDeleteRes
   return `Integration "${name}" deleted. Removed ${formatCount(result.deletedServiceCount, 'service')}, ${formatCount(result.deletedServiceInstanceCount, 'service instance')}, and ${formatCount(result.deletedHostCount, 'orphan host')}.`;
 }
 
+function parseProjectIdsInput(value: string) {
+  return [...new Set(value.split(/[\n,]+/).map((entry) => entry.trim()).filter(Boolean))];
+}
+
+function formatCurrency(value: number, currency = 'usd') {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatWholeNumber(value: number) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function formatUsageDate(value: string) {
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString();
+}
+
 // Administrative settings surface for auth, integrations, AI personality, and UI theme customization.
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -93,6 +122,21 @@ export function SettingsPage() {
     queryKey: ['ai-provider'],
     queryFn: () => apiFetch<AiProviderConfigResponse>('/api/ai/provider'),
   });
+  const [aiUsageWindowDays, setAiUsageWindowDays] = useState<AiUsageWindowDays>(30);
+  const aiProviderModelsQuery = useQuery({
+    queryKey: ['ai-provider-models'],
+    enabled: aiProviderQuery.data?.configured === true && aiProviderQuery.data.provider === 'ollama',
+    queryFn: () => apiFetch<AiProviderModelsResponse>('/api/ai/provider/models'),
+  });
+  const aiUsageConfigQuery = useQuery({
+    queryKey: ['ai-usage-config'],
+    queryFn: () => apiFetch<AiUsageTelemetryConfigResponse>('/api/ai/usage-config'),
+  });
+  const aiUsageSummaryQuery = useQuery({
+    queryKey: ['ai-usage-summary', aiUsageWindowDays],
+    queryFn: () =>
+      apiFetch<AiUsageSummaryResponse>(`/api/ai/usage-summary?windowDays=${aiUsageWindowDays}`),
+  });
   const dashboardAgentConfigQuery = useQuery({
     queryKey: ['dashboard-agent-config'],
     queryFn: () => apiFetch<DashboardAgentConfigResponse>('/api/dashboard-agent/config'),
@@ -115,9 +159,17 @@ export function SettingsPage() {
   const [integrationStatus, setIntegrationStatus] = useState<string | null>(null);
   const [uiThemeDraft, setUiThemeDraft] = useState<UiThemeSettings>(defaultUiThemeSettings);
   const [uiThemeDirty, setUiThemeDirty] = useState(false);
-  const [aiProviderApiKey, setAiProviderApiKey] = useState('');
+  const [aiProviderSelection, setAiProviderSelection] = useState<AiProviderSelection>('openai');
+  const [aiProviderOpenAiApiKey, setAiProviderOpenAiApiKey] = useState('');
+  const [aiProviderOllamaBaseUrl, setAiProviderOllamaBaseUrl] = useState(defaultOllamaBaseUrl);
+  const [aiProviderOllamaApiKey, setAiProviderOllamaApiKey] = useState('');
+  const [aiProviderOllamaModel, setAiProviderOllamaModel] = useState('');
   const [aiProviderError, setAiProviderError] = useState<string | null>(null);
   const [aiProviderStatus, setAiProviderStatus] = useState<string | null>(null);
+  const [aiUsageAdminApiKey, setAiUsageAdminApiKey] = useState('');
+  const [aiUsageProjectIdsText, setAiUsageProjectIdsText] = useState('');
+  const [aiUsageError, setAiUsageError] = useState<string | null>(null);
+  const [aiUsageStatus, setAiUsageStatus] = useState<string | null>(null);
   const [aiPersonalityDraft, setAiPersonalityDraft] = useState('');
   const [aiPersonalityDirty, setAiPersonalityDirty] = useState(false);
   const [dashboardAgentEnabled, setDashboardAgentEnabled] = useState(true);
@@ -150,6 +202,26 @@ export function SettingsPage() {
     }
     setAiPersonalityDraft(aiPersonalityQuery.data.personality);
   }, [aiPersonalityDirty, aiPersonalityQuery.data]);
+
+  useEffect(() => {
+    if (!aiProviderQuery.data) {
+      return;
+    }
+
+    setAiProviderSelection(aiProviderQuery.data.provider === 'ollama' ? 'ollama' : 'openai');
+    if (aiProviderQuery.data.provider === 'ollama') {
+      setAiProviderOllamaBaseUrl(aiProviderQuery.data.ollama?.baseUrl ?? defaultOllamaBaseUrl);
+      setAiProviderOllamaModel(aiProviderQuery.data.model ?? '');
+    }
+  }, [aiProviderQuery.data]);
+
+  useEffect(() => {
+    if (!aiUsageConfigQuery.data) {
+      return;
+    }
+
+    setAiUsageProjectIdsText(aiUsageConfigQuery.data.projectIds.join('\n'));
+  }, [aiUsageConfigQuery.data]);
 
   useEffect(() => {
     if (!dashboardAgentConfigQuery.data || dashboardAgentDirty) {
@@ -254,28 +326,92 @@ export function SettingsPage() {
   });
 
   const saveAiProviderMutation = useMutation({
-    mutationFn: (apiKey: string | null) =>
+    mutationFn: (payload: Record<string, unknown>) =>
       apiFetch<AiProviderConfigResponse>('/api/ai/provider', {
         method: 'PUT',
         body: JSON.stringify({
           confirm: true,
-          apiKey,
+          ...payload,
         }),
       }),
     onMutate: () => {
       setAiProviderError(null);
       setAiProviderStatus(null);
     },
-    onSuccess: async (_result, apiKey) => {
-      setAiProviderApiKey('');
-      setAiProviderStatus(apiKey === null ? 'OpenAI API key cleared.' : 'OpenAI API key saved.');
-      await queryClient.invalidateQueries({ queryKey: ['ai-provider'] });
-      await queryClient.invalidateQueries({ queryKey: ['ai-status'] });
+    onSuccess: async (_result, payload) => {
+      setAiProviderOpenAiApiKey('');
+      setAiProviderOllamaApiKey('');
+      setAiProviderStatus(
+        payload.provider === 'none'
+          ? 'AI provider cleared.'
+          : payload.provider === 'ollama'
+            ? 'Ollama provider saved.'
+            : 'OpenAI provider saved.',
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ai-provider'] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-provider-models'] }),
+      ]);
     },
     onError: (error) => {
       setAiProviderError(
-        error instanceof Error ? error.message : 'Failed to update OpenAI API key.',
+        error instanceof Error ? error.message : 'Failed to update the AI provider.',
       );
+    },
+  });
+
+  const saveAiUsageConfigMutation = useMutation({
+    mutationFn: (payload: { adminApiKey: string | null; projectIds: string[] }) =>
+      apiFetch<AiUsageTelemetryConfigResponse>('/api/ai/usage-config', {
+        method: 'PUT',
+        body: JSON.stringify({
+          confirm: true,
+          ...payload,
+        }),
+      }),
+    onMutate: () => {
+      setAiUsageError(null);
+      setAiUsageStatus(null);
+    },
+    onSuccess: async (_result, payload) => {
+      setAiUsageAdminApiKey('');
+      setAiUsageStatus(
+        payload.adminApiKey === null ? 'Telemetry key cleared.' : 'Telemetry settings saved.',
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ai-usage-config'] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-usage-summary'] }),
+      ]);
+    },
+    onError: (error) => {
+      setAiUsageError(
+        error instanceof Error ? error.message : 'Failed to update telemetry settings.',
+      );
+    },
+  });
+
+  const refreshAiUsageMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<AiUsageRefreshResponse>('/api/ai/usage-refresh', {
+        method: 'POST',
+        body: JSON.stringify({
+          confirm: true,
+        }),
+      }),
+    onMutate: () => {
+      setAiUsageError(null);
+      setAiUsageStatus(null);
+    },
+    onSuccess: async () => {
+      setAiUsageStatus('Usage snapshot refreshed.');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ai-usage-config'] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-usage-summary'] }),
+      ]);
+    },
+    onError: (error) => {
+      setAiUsageError(error instanceof Error ? error.message : 'Failed to refresh usage data.');
     },
   });
 
@@ -393,6 +529,8 @@ export function SettingsPage() {
   const deletingIntegrationId = deleteIntegrationMutation.isPending
     ? (deleteIntegrationMutation.variables?.id ?? null)
     : null;
+  const aiUsageSummary = aiUsageSummaryQuery.data ?? null;
+  const usageSnapshot = aiUsageSummaryQuery.data?.snapshot ?? null;
 
   /**
    * Implements reset integration form.
@@ -406,6 +544,8 @@ export function SettingsPage() {
     integrationsQuery.isLoading ||
     routesQuery.isLoading ||
     aiProviderQuery.isLoading ||
+    aiUsageConfigQuery.isLoading ||
+    aiUsageSummaryQuery.isLoading ||
     aiPersonalityQuery.isLoading ||
     dashboardAgentConfigQuery.isLoading ||
     uiThemeQuery.isLoading
@@ -996,66 +1136,482 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>AI Provider</CardTitle>
           <CardDescription>
-            Configure the installation-wide OpenAI API key used by model-backed AI features.
+            Configure the installation-wide AI provider used by model-backed features.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm">
+        <CardContent className="space-y-4 text-sm">
           <div className="text-xs text-muted-foreground">
             {aiProviderQuery.data?.configured
-              ? 'OpenAI API key is configured.'
-              : 'OpenAI API key is not configured.'}{' '}
-            Model: {aiProviderQuery.data?.model ?? 'gpt-5-mini'}.
+              ? `Active provider: ${
+                  aiProviderQuery.data.provider === 'ollama' ? 'Ollama' : 'OpenAI'
+                }.`
+              : 'No AI provider is configured.'}{' '}
+            {aiProviderQuery.data?.model ? `Model: ${aiProviderQuery.data.model}.` : ''}
             {aiProviderQuery.data?.updatedAt
               ? ` Last updated ${new Date(aiProviderQuery.data.updatedAt).toLocaleString()}.`
               : ''}
           </div>
-          <div className="space-y-1">
-            <label htmlFor="ai-provider-api-key" className="text-sm text-muted-foreground">
-              OpenAI API Key
-            </label>
-            <Input
-              id="ai-provider-api-key"
-              type="password"
-              value={aiProviderApiKey}
-              autoComplete="new-password"
-              placeholder={
-                aiProviderQuery.data?.configured
-                  ? 'Enter a replacement key'
-                  : 'Enter a key to enable AI features'
-              }
-              onChange={(event) => setAiProviderApiKey(event.target.value)}
-            />
-            <div className="text-xs text-muted-foreground">
-              The key is write-only from the UI and takes effect without restarting the stack.
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor="ai-provider-kind" className="text-sm text-muted-foreground">
+                Provider
+              </label>
+              <Select
+                id="ai-provider-kind"
+                value={aiProviderSelection}
+                onChange={(event) => setAiProviderSelection(event.target.value as AiProviderSelection)}
+              >
+                <option value="openai">OpenAI</option>
+                <option value="ollama">Ollama</option>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">Current Model</label>
+              <Input
+                readOnly
+                value={
+                  aiProviderSelection === 'ollama'
+                    ? aiProviderOllamaModel || aiProviderQuery.data?.model || ''
+                    : aiProviderQuery.data?.provider === 'openai'
+                      ? aiProviderQuery.data?.model ?? 'gpt-5-mini'
+                      : 'gpt-5-mini'
+                }
+              />
             </div>
           </div>
+          {aiProviderSelection === 'openai' ? (
+            <div className="space-y-1">
+              <label htmlFor="ai-provider-openai-key" className="text-sm text-muted-foreground">
+                OpenAI API Key
+              </label>
+              <Input
+                id="ai-provider-openai-key"
+                type="password"
+                value={aiProviderOpenAiApiKey}
+                autoComplete="new-password"
+                placeholder={
+                  aiProviderQuery.data?.provider === 'openai' && aiProviderQuery.data?.configured
+                    ? 'Enter a replacement key'
+                    : 'Enter a key to enable AI features'
+                }
+                onChange={(event) => setAiProviderOpenAiApiKey(event.target.value)}
+              />
+              <div className="text-xs text-muted-foreground">
+                OpenAI continues using the environment model. The key is write-only from the UI.
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label htmlFor="ai-provider-ollama-url" className="text-sm text-muted-foreground">
+                  Ollama Base URL
+                </label>
+                <Input
+                  id="ai-provider-ollama-url"
+                  value={aiProviderOllamaBaseUrl}
+                  onChange={(event) => setAiProviderOllamaBaseUrl(event.target.value)}
+                  placeholder={defaultOllamaBaseUrl}
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="ai-provider-ollama-token"
+                  className="text-sm text-muted-foreground"
+                >
+                  Ollama Token
+                </label>
+                <Input
+                  id="ai-provider-ollama-token"
+                  type="password"
+                  value={aiProviderOllamaApiKey}
+                  autoComplete="new-password"
+                  placeholder="Optional bearer token"
+                  onChange={(event) => setAiProviderOllamaApiKey(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <label
+                  htmlFor="ai-provider-ollama-model"
+                  className="text-sm text-muted-foreground"
+                >
+                  Ollama Model
+                </label>
+                <Input
+                  id="ai-provider-ollama-model"
+                  value={aiProviderOllamaModel}
+                  onChange={(event) => setAiProviderOllamaModel(event.target.value)}
+                  placeholder="qwen3:8b"
+                />
+              </div>
+              {aiProviderModelsQuery.data?.supported && aiProviderModelsQuery.data.models.length > 0 && (
+                <div className="space-y-1 md:col-span-2">
+                  <label
+                    htmlFor="ai-provider-ollama-discovered"
+                    className="text-sm text-muted-foreground"
+                  >
+                    Discovered Models
+                  </label>
+                  <Select
+                    id="ai-provider-ollama-discovered"
+                    value={aiProviderOllamaModel}
+                    onChange={(event) => setAiProviderOllamaModel(event.target.value)}
+                  >
+                    {aiProviderModelsQuery.data.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.id}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              {aiProviderModelsQuery.isError && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 md:col-span-2">
+                  Model discovery failed. The saved provider stays active, and you can still enter a
+                  model name manually.
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               disabled={saveAiProviderMutation.isPending}
               onClick={() => {
-                const trimmed = aiProviderApiKey.trim();
-                if (trimmed.length === 0) {
-                  setAiProviderError('Enter an OpenAI API key or use Clear Key.');
+                if (aiProviderSelection === 'openai') {
+                  const apiKey = aiProviderOpenAiApiKey.trim();
+                  if (!apiKey) {
+                    setAiProviderError('Enter an OpenAI API key before saving.');
+                    setAiProviderStatus(null);
+                    return;
+                  }
+                  saveAiProviderMutation.mutate({
+                    provider: 'openai',
+                    apiKey,
+                  });
+                  return;
+                }
+
+                const baseUrl = aiProviderOllamaBaseUrl.trim();
+                const model = aiProviderOllamaModel.trim();
+                if (!baseUrl) {
+                  setAiProviderError('Enter an Ollama base URL before saving.');
                   setAiProviderStatus(null);
                   return;
                 }
-                saveAiProviderMutation.mutate(trimmed);
+                if (!model) {
+                  setAiProviderError('Enter an Ollama model before saving.');
+                  setAiProviderStatus(null);
+                  return;
+                }
+                saveAiProviderMutation.mutate({
+                  provider: 'ollama',
+                  baseUrl,
+                  model,
+                  apiKey: aiProviderOllamaApiKey.trim() || null,
+                });
               }}
             >
-              {saveAiProviderMutation.isPending ? 'Saving...' : 'Save Key'}
+              {saveAiProviderMutation.isPending ? 'Saving...' : 'Save Provider'}
             </Button>
             <Button
               size="sm"
               variant="outline"
               disabled={saveAiProviderMutation.isPending || !aiProviderQuery.data?.configured}
-              onClick={() => saveAiProviderMutation.mutate(null)}
+              onClick={() => saveAiProviderMutation.mutate({ provider: 'none' })}
             >
-              {saveAiProviderMutation.isPending ? 'Clearing...' : 'Clear Key'}
+              {saveAiProviderMutation.isPending ? 'Clearing...' : 'Clear Provider'}
             </Button>
+            {aiProviderSelection === 'ollama' && (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={
+                  aiProviderModelsQuery.isFetching ||
+                  !(aiProviderQuery.data?.configured && aiProviderQuery.data.provider === 'ollama')
+                }
+                onClick={() => {
+                  void queryClient.invalidateQueries({ queryKey: ['ai-provider-models'] });
+                }}
+              >
+                {aiProviderModelsQuery.isFetching ? 'Refreshing...' : 'Retry Model Discovery'}
+              </Button>
+            )}
           </div>
           {aiProviderError && <div className="text-xs text-rose-400">{aiProviderError}</div>}
           {aiProviderStatus && <div className="text-xs text-emerald-400">{aiProviderStatus}</div>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>OpenAI Usage &amp; Spend</CardTitle>
+          <CardDescription>
+            View cached OpenAI administration telemetry for this installation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="text-xs text-muted-foreground">
+            {aiUsageConfigQuery.data?.configured
+              ? `Telemetry is configured for ${
+                  aiUsageConfigQuery.data.projectIds.length > 0
+                    ? `${aiUsageConfigQuery.data.projectIds.length} project(s)`
+                    : 'all projects'
+                }.`
+              : 'Telemetry is not configured.'}{' '}
+            {aiUsageConfigQuery.data?.updatedAt
+              ? `Last updated ${new Date(aiUsageConfigQuery.data.updatedAt).toLocaleString()}.`
+              : ''}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor="ai-usage-admin-key" className="text-sm text-muted-foreground">
+                OpenAI Admin API Key
+              </label>
+              <Input
+                id="ai-usage-admin-key"
+                type="password"
+                autoComplete="new-password"
+                value={aiUsageAdminApiKey}
+                placeholder={
+                  aiUsageConfigQuery.data?.configured
+                    ? 'Enter a replacement admin key'
+                    : 'Enter an OpenAI Admin API key'
+                }
+                onChange={(event) => setAiUsageAdminApiKey(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="ai-usage-project-ids" className="text-sm text-muted-foreground">
+                Project IDs
+              </label>
+              <Textarea
+                id="ai-usage-project-ids"
+                rows={4}
+                value={aiUsageProjectIdsText}
+                placeholder={'proj_123\nproj_456'}
+                onChange={(event) => setAiUsageProjectIdsText(event.target.value)}
+              />
+            </div>
+          </div>
+
+          {!aiUsageConfigQuery.data?.configured && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+              This card requires a separate OpenAI Admin API key. The runtime provider key only
+              powers inference.
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={saveAiUsageConfigMutation.isPending}
+              onClick={() => {
+                const projectIds = parseProjectIdsInput(aiUsageProjectIdsText);
+                const adminApiKey = aiUsageAdminApiKey.trim();
+                if (!adminApiKey) {
+                  setAiUsageError('Enter an OpenAI Admin API key before saving.');
+                  setAiUsageStatus(null);
+                  return;
+                }
+                saveAiUsageConfigMutation.mutate({
+                  adminApiKey,
+                  projectIds,
+                });
+              }}
+            >
+              {saveAiUsageConfigMutation.isPending ? 'Saving...' : 'Save Telemetry Key'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={saveAiUsageConfigMutation.isPending || !aiUsageConfigQuery.data?.configured}
+              onClick={() =>
+                saveAiUsageConfigMutation.mutate({
+                  adminApiKey: null,
+                  projectIds: [],
+                })
+              }
+            >
+              {saveAiUsageConfigMutation.isPending ? 'Clearing...' : 'Clear Telemetry Key'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={refreshAiUsageMutation.isPending || !aiUsageConfigQuery.data?.configured}
+              onClick={() => refreshAiUsageMutation.mutate()}
+            >
+              {refreshAiUsageMutation.isPending ? 'Refreshing...' : 'Refresh Usage Data'}
+            </Button>
+          </div>
+
+          {aiUsageSummary && usageSnapshot ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {[7, 30, 90].map((windowDays) => (
+                  <Button
+                    key={windowDays}
+                    size="sm"
+                    variant={aiUsageWindowDays === windowDays ? 'default' : 'outline'}
+                    onClick={() => setAiUsageWindowDays(windowDays as AiUsageWindowDays)}
+                  >
+                    {windowDays}d
+                  </Button>
+                ))}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Last successful refresh {new Date(usageSnapshot.syncedAt).toLocaleString()}. Scope:{' '}
+                {aiUsageSummary.projectIds.length > 0
+                  ? aiUsageSummary.projectIds.join(', ')
+                  : 'All projects'}
+                .
+              </div>
+              {aiUsageSummary.projectIds.length === 0 && (
+                <div className="rounded-md border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-100">
+                  Org-wide spend may include non-text usage outside the text-model token totals.
+                </div>
+              )}
+              {aiUsageSummary.lastRefreshError && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+                  Last refresh failed {new Date(aiUsageSummary.lastRefreshError.occurredAt).toLocaleString()}
+                  : {aiUsageSummary.lastRefreshError.message}
+                </div>
+              )}
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Spend Today</div>
+                  <div className="text-lg font-semibold">
+                    {formatCurrency(
+                      usageSnapshot.totals.spendToday,
+                      usageSnapshot.currency,
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Month-to-Date Spend</div>
+                  <div className="text-lg font-semibold">
+                    {formatCurrency(
+                      usageSnapshot.totals.spendMonthToDate,
+                      usageSnapshot.currency,
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">
+                    Spend Over {aiUsageSummary.windowDays}d
+                  </div>
+                  <div className="text-lg font-semibold">
+                    {formatCurrency(
+                      usageSnapshot.totals.spendTotal,
+                      usageSnapshot.currency,
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Requests</div>
+                  <div className="text-lg font-semibold">
+                    {formatWholeNumber(usageSnapshot.totals.requests)}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Input Tokens</div>
+                  <div className="text-lg font-semibold">
+                    {formatWholeNumber(usageSnapshot.totals.inputTokens)}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Output Tokens</div>
+                  <div className="text-lg font-semibold">
+                    {formatWholeNumber(usageSnapshot.totals.outputTokens)}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Cached Input Tokens</div>
+                  <div className="text-lg font-semibold">
+                    {formatWholeNumber(
+                      usageSnapshot.totals.cachedInputTokens,
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="space-y-2 rounded-md border border-border/60 p-3">
+                  <div className="text-sm font-medium">Daily Spend</div>
+                  {usageSnapshot.series.dailySpend.map((row) => (
+                    <div
+                      key={row.date}
+                      className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    >
+                      <span>{formatUsageDate(row.date)}</span>
+                      <span>{formatCurrency(row.amount, usageSnapshot.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2 rounded-md border border-border/60 p-3">
+                  <div className="text-sm font-medium">Daily Text Usage</div>
+                  {usageSnapshot.series.dailyUsage.map((row) => (
+                    <div key={row.date} className="space-y-1 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>{formatUsageDate(row.date)}</span>
+                        <span>{formatWholeNumber(row.requests)} requests</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Input {formatWholeNumber(row.inputTokens)}</span>
+                        <span>Output {formatWholeNumber(row.outputTokens)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-4 xl:grid-cols-3">
+                <div className="space-y-2 rounded-md border border-border/60 p-3">
+                  <div className="text-sm font-medium">By Model</div>
+                  {usageSnapshot.breakdowns.byModel.map((row, index) => (
+                    <div
+                      key={`${row.label ?? 'unknown'}-${index}`}
+                      className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    >
+                      <span>{row.label ?? 'Unscoped'}</span>
+                      <span>{formatWholeNumber(row.requests)} req</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2 rounded-md border border-border/60 p-3">
+                  <div className="text-sm font-medium">By Project</div>
+                  {usageSnapshot.breakdowns.byProject.map((row, index) => (
+                    <div
+                      key={`${row.label ?? 'unknown'}-${index}`}
+                      className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    >
+                      <span>{row.label ?? 'Unscoped'}</span>
+                      <span>{formatCurrency(row.spend, usageSnapshot.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2 rounded-md border border-border/60 p-3">
+                  <div className="text-sm font-medium">By Line Item</div>
+                  {usageSnapshot.breakdowns.byLineItem.map((row, index) => (
+                    <div
+                      key={`${row.label ?? 'unknown'}-${index}`}
+                      className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    >
+                      <span>{row.label ?? 'Other'}</span>
+                      <span>{formatCurrency(row.amount, usageSnapshot.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            aiUsageConfigQuery.data?.configured && (
+              <div className="rounded-md border border-border/60 p-3 text-xs text-muted-foreground">
+                No usage snapshot has been captured yet. Refresh to pull data from OpenAI.
+              </div>
+            )
+          )}
+
+          {aiUsageError && <div className="text-xs text-rose-400">{aiUsageError}</div>}
+          {aiUsageStatus && <div className="text-xs text-emerald-400">{aiUsageStatus}</div>}
         </CardContent>
       </Card>
 
