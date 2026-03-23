@@ -4,7 +4,7 @@
 
 Completed the requested design-only deliverables for TASK-001 without editing application code or `docs/PRODUCT_BACKLOG.md`.
 
-## Files Added
+## Files Changed
 
 - `docs/task-001-ollama-provider-plan.md`
 - `agent-reports/TASK-001-report.md`
@@ -19,11 +19,12 @@ Completed the requested design-only deliverables for TASK-001 without editing ap
 
 ## Verification
 
-Planned after file creation:
+Commands run:
 
 - `pnpm exec prettier --check docs/task-001-ollama-provider-plan.md agent-reports/TASK-001-report.md`
-- `git diff --check`
+- `git diff --check -- docs/task-001-ollama-provider-plan.md agent-reports/TASK-001-report.md`
 
 ## Notes
 
-- The workspace already contains unrelated changes in `docs/PRODUCT_BACKLOG.md`, plus separate untracked draft files outside this task’s requested report path. This worker did not modify them.
+- The workspace already contains an unrelated modification in `docs/PRODUCT_BACKLOG.md`.
+- A separate untracked lowercase TASK-001 draft report exists in the workspace and was intentionally ignored.
