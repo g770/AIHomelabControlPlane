@@ -19,6 +19,9 @@ This is a backlog of product features to be implmemented by an AI agent. Agents 
 - ONLY execute tasks that are in the open backlog items list.
 
 ## Open Backlog Items
+- TASK-003: Implement the plan in the file docs/task-003-neutral-ai-runtime-library-design.md
+- TASK-004: Implement the plan in the file docs/task-004-neutral-ai-runtime-integration-design.md
+- TASK-005: Implement the plan in the docs/openai-usage-spend-settings-design.md
 
 ## Completed Backlog Items
 
