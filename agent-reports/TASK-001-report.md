@@ -26,5 +26,4 @@ Commands run:
 
 ## Notes
 
-- The workspace already contains an unrelated modification in `docs/PRODUCT_BACKLOG.md`.
-- A separate untracked lowercase TASK-001 draft report exists in the workspace and was intentionally ignored.
+- The workspace already contained an unrelated modification in `docs/PRODUCT_BACKLOG.md` while this task was in progress.
