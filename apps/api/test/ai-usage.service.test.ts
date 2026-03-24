@@ -250,12 +250,25 @@ describe('AiUsageService', () => {
         lastRefreshError: null,
       },
     });
+    const requestLog: Array<{
+      pathname: string;
+      groupBy: string[];
+      page: string | null;
+      limit: string | null;
+    }> = [];
 
     fetchMock.mockImplementation(async (input: URL | string) => {
       const url = new URL(String(input));
       const pathname = url.pathname;
       const groupBy = url.searchParams.getAll('group_by');
       const page = url.searchParams.get('page');
+      const limit = url.searchParams.get('limit');
+      requestLog.push({
+        pathname,
+        groupBy,
+        page,
+        limit,
+      });
 
       if (pathname === '/v1/organization/costs' && groupBy.length === 0 && page === null) {
         return jsonResponse({
@@ -302,31 +315,44 @@ describe('AiUsageService', () => {
         });
       }
       if (pathname === '/v1/organization/usage/completions' && groupBy.length === 0) {
+        if (page === null) {
+          return jsonResponse({
+            data: [
+              {
+                start_time: Math.floor(Date.parse('2026-03-22T00:00:00.000Z') / 1000),
+                results: [
+                  {
+                    num_model_requests: 2,
+                    input_tokens: 100,
+                    output_tokens: 40,
+                    input_cached_tokens: 10,
+                  },
+                ],
+              },
+            ],
+            next_page: 'usage-page-2',
+          });
+        }
+        if (page === 'usage-page-2') {
+          return jsonResponse({
+            data: [
+              {
+                start_time: Math.floor(Date.parse('2026-03-23T00:00:00.000Z') / 1000),
+                results: [
+                  {
+                    num_model_requests: 1,
+                    input_tokens: 60,
+                    output_tokens: 20,
+                    input_cached_tokens: 0,
+                  },
+                ],
+              },
+            ],
+            next_page: null,
+          });
+        }
         return jsonResponse({
-          data: [
-            {
-              start_time: Math.floor(Date.parse('2026-03-22T00:00:00.000Z') / 1000),
-              results: [
-                {
-                  num_model_requests: 2,
-                  input_tokens: 100,
-                  output_tokens: 40,
-                  input_cached_tokens: 10,
-                },
-              ],
-            },
-            {
-              start_time: Math.floor(Date.parse('2026-03-23T00:00:00.000Z') / 1000),
-              results: [
-                {
-                  num_model_requests: 1,
-                  input_tokens: 60,
-                  output_tokens: 20,
-                  input_cached_tokens: 0,
-                },
-              ],
-            },
-          ],
+          data: [],
           next_page: null,
         });
       }
@@ -380,7 +406,15 @@ describe('AiUsageService', () => {
       lastRefreshError: null,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    const costRequests = requestLog.filter((request) => request.pathname === '/v1/organization/costs');
+    const usageRequests = requestLog.filter(
+      (request) => request.pathname === '/v1/organization/usage/completions',
+    );
+    expect(costRequests).toHaveLength(4);
+    expect(usageRequests).toHaveLength(4);
+    expect(costRequests.every((request) => request.limit === '90')).toBe(true);
+    expect(usageRequests.every((request) => request.limit === '31')).toBe(true);
     expect(prisma.opsMemory.upsert.mock.calls[1]?.[0]).toMatchObject({
       where: {
         userId_key: {
@@ -442,6 +476,76 @@ describe('AiUsageService', () => {
         success: true,
       },
       success: true,
+    });
+  });
+
+  it('records safe request-validation failures when OpenAI rejects telemetry parameters', async () => {
+    prisma.opsMemory.findUnique.mockResolvedValueOnce({
+      id: 'telemetry-1',
+      updatedAt: new Date('2026-03-23T11:55:00.000Z'),
+      value: {
+        adminKeyEncrypted: 'encrypted-admin-key',
+        projectIds: ['proj_123'],
+        lastRefreshAttemptAt: null,
+        lastRefreshSucceededAt: '2026-03-22T12:00:00.000Z',
+        lastRefreshError: null,
+      },
+    });
+    securityService.decryptJson.mockReturnValueOnce({
+      apiKey: 'sk-admin-live',
+    });
+    prisma.opsMemory.upsert.mockResolvedValueOnce({
+      id: 'telemetry-attempt-1',
+    });
+    prisma.opsMemory.update.mockResolvedValueOnce({
+      value: {
+        adminKeyEncrypted: 'encrypted-admin-key',
+        projectIds: ['proj_123'],
+        lastRefreshAttemptAt: '2026-03-23T12:00:00.000Z',
+        lastRefreshSucceededAt: '2026-03-22T12:00:00.000Z',
+        lastRefreshError: {
+          message: 'OpenAI rejected the telemetry request.',
+          occurredAt: '2026-03-23T12:00:00.000Z',
+        },
+      },
+    });
+    fetchMock.mockImplementation(async () => jsonResponse({ error: { message: 'bad request' } }, 400));
+
+    await expect(service.refreshUsage('user-1')).rejects.toEqual(
+      new BadRequestException('OpenAI rejected the telemetry request.'),
+    );
+
+    expect(prisma.opsMemory.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.opsMemory.update).toHaveBeenCalledWith({
+      where: {
+        userId_key: {
+          userId: 'local-admin-id',
+          key: 'ai_usage_telemetry_v1',
+        },
+      },
+      data: {
+        value: {
+          adminKeyEncrypted: 'encrypted-admin-key',
+          projectIds: ['proj_123'],
+          lastRefreshAttemptAt: '2026-03-23T12:00:00.000Z',
+          lastRefreshSucceededAt: '2026-03-22T12:00:00.000Z',
+          lastRefreshError: {
+            message: 'OpenAI rejected the telemetry request.',
+            occurredAt: '2026-03-23T12:00:00.000Z',
+          },
+        },
+      },
+    });
+    expect(auditService.write).toHaveBeenCalledWith({
+      actorUserId: 'user-1',
+      action: 'ai.usage.refresh',
+      targetType: 'ops_memory',
+      targetId: 'telemetry-attempt-1',
+      paramsJson: {
+        projectIdCount: 1,
+        success: false,
+      },
+      success: false,
     });
   });
 

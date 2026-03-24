@@ -28,6 +28,7 @@ import { PageSkeleton } from '@/components/page-skeleton';
 import type {
   AiProviderConfigResponse,
   AiProviderId,
+  AiProviderModelsDiscoverRequest,
   AiProviderModelsResponse,
   AiUsageRefreshResponse,
   AiUsageSummaryResponse,
@@ -123,11 +124,6 @@ export function SettingsPage() {
     queryFn: () => apiFetch<AiProviderConfigResponse>('/api/ai/provider'),
   });
   const [aiUsageWindowDays, setAiUsageWindowDays] = useState<AiUsageWindowDays>(30);
-  const aiProviderModelsQuery = useQuery({
-    queryKey: ['ai-provider-models'],
-    enabled: aiProviderQuery.data?.configured === true && aiProviderQuery.data.provider === 'ollama',
-    queryFn: () => apiFetch<AiProviderModelsResponse>('/api/ai/provider/models'),
-  });
   const aiUsageConfigQuery = useQuery({
     queryKey: ['ai-usage-config'],
     queryFn: () => apiFetch<AiUsageTelemetryConfigResponse>('/api/ai/usage-config'),
@@ -164,6 +160,10 @@ export function SettingsPage() {
   const [aiProviderOllamaBaseUrl, setAiProviderOllamaBaseUrl] = useState(defaultOllamaBaseUrl);
   const [aiProviderOllamaApiKey, setAiProviderOllamaApiKey] = useState('');
   const [aiProviderOllamaModel, setAiProviderOllamaModel] = useState('');
+  const [aiProviderDiscoveredModels, setAiProviderDiscoveredModels] =
+    useState<AiProviderModelsResponse | null>(null);
+  const [aiProviderDiscoveryError, setAiProviderDiscoveryError] = useState<string | null>(null);
+  const [aiProviderDiscoveryStatus, setAiProviderDiscoveryStatus] = useState<string | null>(null);
   const [aiProviderError, setAiProviderError] = useState<string | null>(null);
   const [aiProviderStatus, setAiProviderStatus] = useState<string | null>(null);
   const [aiUsageAdminApiKey, setAiUsageAdminApiKey] = useState('');
@@ -222,6 +222,12 @@ export function SettingsPage() {
 
     setAiUsageProjectIdsText(aiUsageConfigQuery.data.projectIds.join('\n'));
   }, [aiUsageConfigQuery.data]);
+
+  useEffect(() => {
+    setAiProviderDiscoveredModels(null);
+    setAiProviderDiscoveryError(null);
+    setAiProviderDiscoveryStatus(null);
+  }, [aiProviderSelection, aiProviderOllamaBaseUrl, aiProviderOllamaApiKey]);
 
   useEffect(() => {
     if (!dashboardAgentConfigQuery.data || dashboardAgentDirty) {
@@ -335,12 +341,17 @@ export function SettingsPage() {
         }),
       }),
     onMutate: () => {
+      setAiProviderDiscoveryError(null);
+      setAiProviderDiscoveryStatus(null);
       setAiProviderError(null);
       setAiProviderStatus(null);
     },
     onSuccess: async (_result, payload) => {
       setAiProviderOpenAiApiKey('');
       setAiProviderOllamaApiKey('');
+      if (payload.provider !== 'ollama') {
+        setAiProviderDiscoveredModels(null);
+      }
       setAiProviderStatus(
         payload.provider === 'none'
           ? 'AI provider cleared.'
@@ -351,12 +362,45 @@ export function SettingsPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['ai-provider'] }),
         queryClient.invalidateQueries({ queryKey: ['ai-status'] }),
-        queryClient.invalidateQueries({ queryKey: ['ai-provider-models'] }),
       ]);
     },
     onError: (error) => {
       setAiProviderError(
         error instanceof Error ? error.message : 'Failed to update the AI provider.',
+      );
+    },
+  });
+
+  const discoverAiProviderModelsMutation = useMutation({
+    mutationFn: (payload: AiProviderModelsDiscoverRequest) =>
+      apiFetch<AiProviderModelsResponse>('/api/ai/provider/models/discover', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onMutate: () => {
+      setAiProviderDiscoveryError(null);
+      setAiProviderDiscoveryStatus(null);
+      setAiProviderError(null);
+      setAiProviderStatus(null);
+    },
+    onSuccess: (result) => {
+      setAiProviderDiscoveredModels(result);
+      if (result.models.length === 0) {
+        setAiProviderDiscoveryStatus('No Ollama models were discovered at the configured URL.');
+        return;
+      }
+
+      if (!result.models.some((model) => model.id === aiProviderOllamaModel.trim())) {
+        setAiProviderOllamaModel(result.models[0]?.id ?? '');
+      }
+      setAiProviderDiscoveryStatus(
+        `Discovered ${formatCount(result.models.length, 'Ollama model')}.`,
+      );
+    },
+    onError: (error) => {
+      setAiProviderDiscoveredModels(null);
+      setAiProviderDiscoveryError(
+        error instanceof Error ? error.message : 'Model discovery failed.',
       );
     },
   });
@@ -1240,10 +1284,14 @@ export function SettingsPage() {
                   id="ai-provider-ollama-model"
                   value={aiProviderOllamaModel}
                   onChange={(event) => setAiProviderOllamaModel(event.target.value)}
-                  placeholder="qwen3:8b"
+                  placeholder="qwen3.5:latest"
                 />
+                <div className="text-xs text-muted-foreground">
+                  Model IDs must exactly match an Ollama tag, for example{' '}
+                  <code>qwen3.5:latest</code>.
+                </div>
               </div>
-              {aiProviderModelsQuery.data?.supported && aiProviderModelsQuery.data.models.length > 0 && (
+              {aiProviderDiscoveredModels?.supported && aiProviderDiscoveredModels.models.length > 0 && (
                 <div className="space-y-1 md:col-span-2">
                   <label
                     htmlFor="ai-provider-ollama-discovered"
@@ -1256,7 +1304,7 @@ export function SettingsPage() {
                     value={aiProviderOllamaModel}
                     onChange={(event) => setAiProviderOllamaModel(event.target.value)}
                   >
-                    {aiProviderModelsQuery.data.models.map((model) => (
+                    {aiProviderDiscoveredModels.models.map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.id}
                       </option>
@@ -1264,10 +1312,14 @@ export function SettingsPage() {
                   </Select>
                 </div>
               )}
-              {aiProviderModelsQuery.isError && (
+              {aiProviderDiscoveryError && (
                 <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 md:col-span-2">
-                  Model discovery failed. The saved provider stays active, and you can still enter a
-                  model name manually.
+                  {aiProviderDiscoveryError}
+                </div>
+              )}
+              {aiProviderDiscoveryStatus && (
+                <div className="text-xs text-muted-foreground md:col-span-2">
+                  {aiProviderDiscoveryStatus}
                 </div>
               )}
             </div>
@@ -1325,15 +1377,28 @@ export function SettingsPage() {
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={
-                  aiProviderModelsQuery.isFetching ||
-                  !(aiProviderQuery.data?.configured && aiProviderQuery.data.provider === 'ollama')
-                }
+                disabled={discoverAiProviderModelsMutation.isPending}
                 onClick={() => {
-                  void queryClient.invalidateQueries({ queryKey: ['ai-provider-models'] });
+                  const baseUrl = aiProviderOllamaBaseUrl.trim();
+                  if (!baseUrl) {
+                    setAiProviderDiscoveredModels(null);
+                    setAiProviderDiscoveryError('Enter an Ollama base URL before discovering models.');
+                    setAiProviderDiscoveryStatus(null);
+                    return;
+                  }
+
+                  discoverAiProviderModelsMutation.mutate({
+                    provider: 'ollama',
+                    baseUrl,
+                    apiKey: aiProviderOllamaApiKey.trim() || null,
+                  });
                 }}
               >
-                {aiProviderModelsQuery.isFetching ? 'Refreshing...' : 'Retry Model Discovery'}
+                {discoverAiProviderModelsMutation.isPending
+                  ? 'Discovering...'
+                  : aiProviderDiscoveredModels
+                    ? 'Retry Model Discovery'
+                    : 'Discover Models'}
               </Button>
             )}
           </div>

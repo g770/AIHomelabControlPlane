@@ -15,6 +15,7 @@ import {
   agentRecoverySummaryResponseSchema,
   aiProviderConfigResponseSchema,
   aiProviderConfigUpdateSchema,
+  aiProviderModelsDiscoverRequestSchema,
   aiPersonalityUpdateSchema,
   aiUsageSummaryResponseSchema,
   aiUsageTelemetryConfigUpdateSchema,
@@ -784,6 +785,20 @@ describe('aiProviderConfigResponseSchema', () => {
     expect(parsed.configured).toBe(true);
     expect(parsed.provider).toBe('openai');
     expect(parsed.model).toBe('gpt-5-mini');
+  });
+});
+
+describe('aiProviderModelsDiscoverRequestSchema', () => {
+  it('accepts draft Ollama model discovery input without confirmation', () => {
+    const parsed = aiProviderModelsDiscoverRequestSchema.parse({
+      provider: 'ollama',
+      baseUrl: 'http://192.168.3.120:11434',
+      apiKey: null,
+    });
+
+    expect(parsed.provider).toBe('ollama');
+    expect(parsed.baseUrl).toBe('http://192.168.3.120:11434');
+    expect(parsed.apiKey).toBeNull();
   });
 });
 

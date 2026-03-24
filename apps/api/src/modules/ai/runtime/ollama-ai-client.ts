@@ -53,21 +53,7 @@ export class OllamaAiClient implements AiClient {
 
   async validateConfig(): Promise<AiValidationResult> {
     try {
-      const versionResult = await this.transport.getJson(`${this.baseUrl}/api/version`, {
-        headers: this.buildHeaders(),
-      });
-      const version = readVersion(versionResult.json);
-      if (versionResult.status >= 400) {
-        throw this.createHttpError(versionResult.status);
-      }
-      if (!version || !isOllamaVersionSupported(version, this.config.minVersion ?? MIN_OLLAMA_VERSION)) {
-        return {
-          ok: false as const,
-          provider: this.provider,
-          code: 'unsupported_version',
-          message: `Configured Ollama instance is older than ${this.config.minVersion ?? MIN_OLLAMA_VERSION}.`,
-        };
-      }
+      const version = await this.requireSupportedVersion();
 
       const models = await this.listModelsSafe();
       const availableModelIds = models.map((model) => model.id);
@@ -101,6 +87,7 @@ export class OllamaAiClient implements AiClient {
   }
 
   async listModels() {
+    await this.requireSupportedVersion();
     const models = await this.listModelsSafe();
     return {
       supported: true as const,
@@ -210,6 +197,24 @@ export class OllamaAiClient implements AiClient {
       'provider_error',
       message?.trim() || 'Failed to reach Ollama at the configured URL.',
     );
+  }
+
+  private async requireSupportedVersion() {
+    const versionResult = await this.transport.getJson(`${this.baseUrl}/api/version`, {
+      headers: this.buildHeaders(),
+    });
+    const version = readVersion(versionResult.json);
+    if (versionResult.status >= 400) {
+      throw this.createHttpError(versionResult.status);
+    }
+    if (!version || !isOllamaVersionSupported(version, this.config.minVersion ?? MIN_OLLAMA_VERSION)) {
+      throw new AiRuntimeError(
+        'unsupported_version',
+        `Configured Ollama instance is older than ${this.config.minVersion ?? MIN_OLLAMA_VERSION}.`,
+      );
+    }
+
+    return version;
   }
 }
 

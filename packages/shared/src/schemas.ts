@@ -1518,6 +1518,17 @@ export const aiProviderModelsResponseSchema = z
   })
   .strict();
 
+/**
+ * Implements ai provider model discovery request schema.
+ */
+export const aiProviderModelsDiscoverRequestSchema = z
+  .object({
+    provider: z.literal('ollama'),
+    baseUrl: z.string().trim().min(1).max(1024),
+    apiKey: z.string().min(1).max(4096).nullable().optional(),
+  })
+  .strict();
+
 const aiUsageRefreshErrorSchema = z
   .object({
     message: z.string().min(1).max(500),
@@ -2936,6 +2947,12 @@ export type AiProviderConfigResponse = z.infer<typeof aiProviderConfigResponseSc
  * Describes the ai provider models response shape.
  */
 export type AiProviderModelsResponse = z.infer<typeof aiProviderModelsResponseSchema>;
+/**
+ * Describes the ai provider model discovery request shape.
+ */
+export type AiProviderModelsDiscoverRequest = z.infer<
+  typeof aiProviderModelsDiscoverRequestSchema
+>;
 /**
  * Describes the ai usage telemetry config response shape.
  */

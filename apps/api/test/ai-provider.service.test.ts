@@ -4,7 +4,7 @@
  *
  * This test file verifies the ai provider service behavior.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiProviderService } from '../src/modules/ai/ai-provider.service';
 
 describe('AiProviderService', () => {
@@ -35,9 +35,12 @@ describe('AiProviderService', () => {
   };
 
   let service: AiProviderService;
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     prisma.user.findUnique.mockResolvedValue({
       id: 'local-admin-id',
     });
@@ -48,6 +51,10 @@ describe('AiProviderService', () => {
       securityService as never,
       auditService as never,
     );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('falls back to legacy ai_provider_v1 metadata without exposing the key', async () => {
@@ -229,6 +236,73 @@ describe('AiProviderService', () => {
       },
       success: true,
     });
+  });
+
+  it('discovers draft Ollama models without persisting configuration', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        status: 200,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ version: '0.18.2' })),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        text: vi.fn().mockResolvedValue(
+          JSON.stringify({
+            models: [
+              {
+                name: 'qwen3.5:latest',
+                modified_at: '2026-03-23T19:25:50.434Z',
+                size: 6594474711,
+                details: {
+                  family: 'qwen35',
+                  parameter_size: '9.7B',
+                  quantization_level: 'Q4_K_M',
+                },
+              },
+            ],
+          }),
+        ),
+      });
+
+    await expect(
+      service.discoverAvailableModels({
+        provider: 'ollama',
+        baseUrl: 'http://192.168.3.120:11434/',
+        apiKey: null,
+      }),
+    ).resolves.toEqual({
+      provider: 'ollama',
+      supported: true,
+      fetchedAt: expect.any(String),
+      models: [
+        {
+          id: 'qwen3.5:latest',
+          modifiedAt: '2026-03-23T19:25:50.434Z',
+          sizeBytes: 6594474711,
+          family: 'qwen35',
+          parameterSize: '9.7B',
+          quantizationLevel: 'Q4_K_M',
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://192.168.3.120:11434/api/version',
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://192.168.3.120:11434/api/tags',
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.opsMemory.upsert).not.toHaveBeenCalled();
+    expect(auditService.write).not.toHaveBeenCalled();
   });
 
   it('reports unconfigured status when the installation admin is missing', async () => {

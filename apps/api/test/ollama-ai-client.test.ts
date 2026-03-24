@@ -34,6 +34,10 @@ describe('OllamaAiClient', () => {
       })
       .mockResolvedValueOnce({
         status: 200,
+        json: { version: '0.13.3' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
         json: {
           models: [
             {
@@ -85,6 +89,9 @@ describe('OllamaAiClient', () => {
       ],
     });
     expect(getJson).toHaveBeenNthCalledWith(1, 'http://ollama:11434/api/version', {
+      headers: undefined,
+    });
+    expect(getJson).toHaveBeenNthCalledWith(3, 'http://ollama:11434/api/version', {
       headers: undefined,
     });
   });
@@ -172,6 +179,28 @@ describe('OllamaAiClient', () => {
       headers: {
         Authorization: 'Bearer ollama-token',
       },
+    });
+  });
+
+  it('surfaces unsupported-version errors when discovering models', async () => {
+    const client = new OllamaAiClient(
+      {
+        provider: 'ollama',
+        baseUrl: 'http://ollama:11434',
+        model: 'qwen3.5:latest',
+      },
+      {
+        getJson: vi.fn().mockResolvedValue({
+          status: 200,
+          json: { version: '0.13.2' },
+        }),
+        postJson: vi.fn(),
+      },
+    );
+
+    await expect(client.listModels()).rejects.toMatchObject({
+      code: 'unsupported_version',
+      message: 'Configured Ollama instance is older than 0.13.3.',
     });
   });
 });

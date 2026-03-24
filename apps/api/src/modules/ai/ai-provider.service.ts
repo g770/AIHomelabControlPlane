@@ -11,6 +11,7 @@ import {
   aiProviderConfigResponseSchema,
   aiProviderModelsResponseSchema,
   type AiProviderConfigUpdate,
+  type AiProviderModelsDiscoverRequest,
 } from '@homelab/shared';
 import { AuditService } from '../audit/audit.service';
 import { SecurityService } from '../common/security.service';
@@ -20,6 +21,7 @@ import { createAiRuntimeClient, normalizeOllamaBaseUrl, type AiClient } from './
 
 const AI_PROVIDER_V1_MEMORY_KEY = 'ai_provider_v1';
 const AI_PROVIDER_V2_MEMORY_KEY = 'ai_provider_v2';
+const OLLAMA_DISCOVERY_MODEL_ID = '__ollama_model_discovery__';
 
 type ConfigOwner = {
   id: string;
@@ -173,6 +175,22 @@ export class AiProviderService {
     }
 
     return aiProviderModelsResponseSchema.parse(await runtime.client.listModels());
+  }
+
+  /**
+   * Discovers available models for a draft provider configuration without saving it.
+   */
+  async discoverAvailableModels(input: AiProviderModelsDiscoverRequest) {
+    const baseUrl = normalizeOllamaBaseUrl(input.baseUrl);
+    const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    const client = createAiRuntimeClient({
+      provider: 'ollama',
+      baseUrl,
+      model: OLLAMA_DISCOVERY_MODEL_ID,
+      apiKey: apiKey || null,
+    });
+
+    return aiProviderModelsResponseSchema.parse(await client.listModels());
   }
 
   /**

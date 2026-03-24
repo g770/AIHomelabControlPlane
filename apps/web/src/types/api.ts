@@ -445,6 +445,15 @@ export type AiProviderModelsResponse = {
 };
 
 /**
+ * Describes the draft ai provider model discovery request shape.
+ */
+export type AiProviderModelsDiscoverRequest = {
+  provider: 'ollama';
+  baseUrl: string;
+  apiKey?: string | null;
+};
+
+/**
  * Describes the ai usage telemetry config response shape.
  */
 export type AiUsageTelemetryConfigResponse = {

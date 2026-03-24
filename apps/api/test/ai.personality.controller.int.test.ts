@@ -27,6 +27,7 @@ describe('AiController personality endpoints (integration)', () => {
     getProviderConfig: vi.fn(),
     setProviderConfig: vi.fn(),
     listAvailableModels: vi.fn(),
+    discoverAvailableModels: vi.fn(),
   };
   const aiUsageServiceMock = {
     getUsageConfig: vi.fn(),
@@ -188,6 +189,46 @@ describe('AiController personality endpoints (integration)', () => {
 
     expect(response.statusCode, response.body).toBe(200);
     expect(aiProviderServiceMock.listAvailableModels).toHaveBeenCalledOnce();
+    expect(body).toMatchObject({
+      provider: 'ollama',
+      supported: true,
+    });
+  });
+
+  it('POST /api/ai/provider/models/discover forwards draft Ollama discovery input', async () => {
+    aiProviderServiceMock.discoverAvailableModels.mockResolvedValueOnce({
+      provider: 'ollama',
+      supported: true,
+      fetchedAt: '2026-03-23T12:05:00.000Z',
+      models: [
+        {
+          id: 'qwen3.5:latest',
+          modifiedAt: '2026-03-23T12:00:00.000Z',
+          sizeBytes: 6594474711,
+          family: 'qwen35',
+          parameterSize: '9.7B',
+          quantizationLevel: 'Q4_K_M',
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/provider/models/discover',
+      payload: {
+        provider: 'ollama',
+        baseUrl: 'http://192.168.3.120:11434',
+        apiKey: null,
+      },
+    });
+    const body = response.json() as Record<string, unknown>;
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(aiProviderServiceMock.discoverAvailableModels).toHaveBeenCalledWith({
+      provider: 'ollama',
+      baseUrl: 'http://192.168.3.120:11434',
+      apiKey: null,
+    });
     expect(body).toMatchObject({
       provider: 'ollama',
       supported: true,

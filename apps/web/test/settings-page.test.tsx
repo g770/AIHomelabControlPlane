@@ -19,10 +19,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+type MockSettingsOptions = {
+  draftOllamaDiscoveryError?: string | null;
+};
+
 /**
  * Implements mock settings requests.
  */
-function mockSettingsRequests(configured = true, integrations: ProxmoxIntegrationSummary[] = []) {
+function mockSettingsRequests(
+  configured = true,
+  integrations: ProxmoxIntegrationSummary[] = [],
+  options: MockSettingsOptions = {},
+) {
   let aiProviderState = configured
     ? {
         configured: true,
@@ -185,6 +193,31 @@ function mockSettingsRequests(configured = true, integrations: ProxmoxIntegratio
             fetchedAt: '2026-03-14T03:26:00.000Z',
             models: [],
           };
+    }
+    if (path === '/api/ai/provider/models/discover' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        provider: 'ollama';
+        baseUrl: string;
+        apiKey?: string | null;
+      };
+      if (options.draftOllamaDiscoveryError) {
+        throw new Error(options.draftOllamaDiscoveryError);
+      }
+      return {
+        provider: body.provider,
+        supported: true,
+        fetchedAt: '2026-03-14T03:26:00.000Z',
+        models: [
+          {
+            id: 'qwen3.5:latest',
+            modifiedAt: '2026-03-14T03:00:00.000Z',
+            sizeBytes: 6594474711,
+            family: 'qwen35',
+            parameterSize: '9.7B',
+            quantizationLevel: 'Q4_K_M',
+          },
+        ],
+      };
     }
     if (path === '/api/ai/usage-config' && (!init || !init.method)) {
       return aiUsageConfigState;
@@ -506,10 +539,86 @@ describe('SettingsPage AI provider settings', () => {
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ai-provider'] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ai-status'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ai-provider-models'] });
     });
 
     expect(await screen.findByText('OpenAI provider saved.')).toBeInTheDocument();
+  });
+
+  it('discovers draft Ollama models before saving and uses the exact tag', async () => {
+    mockSettingsRequests(false);
+
+    const { queryClient } = renderPage();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    expect(await screen.findByText('AI Provider')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'ollama' },
+    });
+    fireEvent.change(screen.getByLabelText('Ollama Base URL'), {
+      target: { value: 'http://192.168.3.120:11434' },
+    });
+    fireEvent.change(screen.getByLabelText('Ollama Model'), {
+      target: { value: 'qwen3.5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Discover Models' }));
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/api/ai/provider/models/discover', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: 'ollama',
+          baseUrl: 'http://192.168.3.120:11434',
+          apiKey: null,
+        }),
+      });
+    });
+
+    expect(await screen.findByText('Discovered 1 Ollama model.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Ollama Model')).toHaveValue('qwen3.5:latest');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Provider' }));
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith('/api/ai/provider', {
+        method: 'PUT',
+        body: JSON.stringify({
+          confirm: true,
+          provider: 'ollama',
+          baseUrl: 'http://192.168.3.120:11434',
+          model: 'qwen3.5:latest',
+          apiKey: null,
+        }),
+      });
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ai-provider'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ai-status'] });
+    });
+
+    expect(await screen.findByText('Ollama provider saved.')).toBeInTheDocument();
+  });
+
+  it('shows the backend discovery error instead of a generic Ollama banner', async () => {
+    mockSettingsRequests(false, [], {
+      draftOllamaDiscoveryError: 'Failed to reach Ollama at the configured URL.',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('AI Provider')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: 'ollama' },
+    });
+    fireEvent.change(screen.getByLabelText('Ollama Base URL'), {
+      target: { value: 'http://192.168.3.120:11434' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Discover Models' }));
+
+    expect(
+      await screen.findByText('Failed to reach Ollama at the configured URL.'),
+    ).toBeInTheDocument();
   });
 
   it('clears the configured AI provider', async () => {

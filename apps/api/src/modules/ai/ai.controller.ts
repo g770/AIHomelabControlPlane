@@ -10,6 +10,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Inject,
   Param,
   Post,
@@ -21,11 +22,13 @@ import {
   aiChatRequestSchema,
   aiConversationRetentionSchema,
   aiProviderConfigUpdateSchema,
+  aiProviderModelsDiscoverRequestSchema,
   aiPersonalityUpdateSchema,
   aiUsageRefreshRequestSchema,
   aiUsageTelemetryConfigUpdateSchema,
   aiUsageWindowDaysSchema,
   type AiProviderConfigUpdate,
+  type AiProviderModelsDiscoverRequest,
   type AiChatRequest,
   type AiConversationRetention,
   type AiPersonalityUpdate,
@@ -100,6 +103,15 @@ export class AiController {
   @Get('provider/models')
   providerModels() {
     return this.aiProviderService.listAvailableModels();
+  }
+
+  @Post('provider/models/discover')
+  @HttpCode(200)
+  discoverProviderModels(
+    @Body(new ZodValidationPipe(aiProviderModelsDiscoverRequestSchema))
+    body: AiProviderModelsDiscoverRequest,
+  ) {
+    return this.aiProviderService.discoverAvailableModels(body);
   }
 
   @Get('hosts/:id/summary')

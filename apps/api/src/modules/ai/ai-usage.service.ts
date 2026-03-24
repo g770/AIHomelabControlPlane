@@ -30,6 +30,8 @@ const AI_USAGE_TELEMETRY_MEMORY_KEY = 'ai_usage_telemetry_v1';
 const AI_USAGE_SNAPSHOT_MEMORY_KEY = 'ai_usage_snapshot_v1';
 const DEFAULT_USAGE_WINDOW_DAYS = 30;
 const SNAPSHOT_FETCH_DAYS = 90;
+const COSTS_BUCKET_LIMIT = SNAPSHOT_FETCH_DAYS;
+const COMPLETIONS_USAGE_DAILY_BUCKET_LIMIT = 31;
 
 type TelemetryRecord = {
   adminKeyEncrypted: string | null;
@@ -322,8 +324,16 @@ export class AiUsageService {
     const sharedParams = {
       start_time: String(startTime),
       bucket_width: '1d',
-      limit: String(SNAPSHOT_FETCH_DAYS),
       project_ids: projectIds,
+    };
+    const costParams = {
+      ...sharedParams,
+      limit: String(COSTS_BUCKET_LIMIT),
+    };
+    const usageParams = {
+      ...sharedParams,
+      // OpenAI caps 1d usage buckets to 31 rows per page; the cursor loop collects the full window.
+      limit: String(COMPLETIONS_USAGE_DAILY_BUCKET_LIMIT),
     };
 
     const [
@@ -334,11 +344,11 @@ export class AiUsageService {
       modelUsage,
       projectUsage,
     ] = await Promise.all([
-      this.fetchBucketPages('/v1/organization/costs', sharedParams, adminApiKey),
+      this.fetchBucketPages('/v1/organization/costs', costParams, adminApiKey),
       this.fetchBucketPages(
         '/v1/organization/costs',
         {
-          ...sharedParams,
+          ...costParams,
           group_by: ['project_id'],
         },
         adminApiKey,
@@ -346,16 +356,16 @@ export class AiUsageService {
       this.fetchBucketPages(
         '/v1/organization/costs',
         {
-          ...sharedParams,
+          ...costParams,
           group_by: ['line_item'],
         },
         adminApiKey,
       ),
-      this.fetchBucketPages('/v1/organization/usage/completions', sharedParams, adminApiKey),
+      this.fetchBucketPages('/v1/organization/usage/completions', usageParams, adminApiKey),
       this.fetchBucketPages(
         '/v1/organization/usage/completions',
         {
-          ...sharedParams,
+          ...usageParams,
           group_by: ['model'],
         },
         adminApiKey,
@@ -363,7 +373,7 @@ export class AiUsageService {
       this.fetchBucketPages(
         '/v1/organization/usage/completions',
         {
-          ...sharedParams,
+          ...usageParams,
           group_by: ['project_id'],
         },
         adminApiKey,
@@ -834,6 +844,9 @@ function readStringField(value: unknown, key: string) {
 function createTelemetryHttpError(status: number) {
   if (status === 401 || status === 403) {
     return new Error('OpenAI rejected the admin credential.');
+  }
+  if (status === 400) {
+    return new Error('OpenAI rejected the telemetry request.');
   }
   return new Error('OpenAI telemetry refresh failed.');
 }
